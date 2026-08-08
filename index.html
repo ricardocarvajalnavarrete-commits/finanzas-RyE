@@ -130,6 +130,7 @@ ul{padding-left:20px;line-height:1.8}
    <a class="ni" data-v="metas" onclick="nav('metas')">🎯 Metas</a>
    <a class="ni" data-v="proyecciones" onclick="nav('proyecciones')">📈 Proyecciones</a>
    <a class="ni" data-v="consejos" onclick="nav('consejos')">💡 Consejos</a>
+   <a class="ni" data-v="archivo" onclick="nav('archivo')">🗄️ Archivo</a>
    <a class="ni" data-v="ajustes" onclick="nav('ajustes')">⚙️ Ajustes</a>
   </nav>
   <div class="side-foot">Hecho para el hogar 💙<br>Los datos viven en tu navegador.</div>
@@ -230,9 +231,9 @@ const mesLabelCorto=m=>{const p=m.split('-');return MESES_N[parseInt(p[1])-1]+' 
 
 function seed(){
  const u=()=>'s'+Math.random().toString(36).slice(2,10);
- const D=(nombre,entidad,responsable,tipo,saldo,cuota,estado,limite,venc,notas)=>({id:u(),nombre,entidad,responsable,tipo,saldo,cuota,estado,limite:limite||0,venc:venc||'',notas:notas||''});
+ const D=(nombre,entidad,responsable,tipo,saldo,cuota,estado,limite,venc,notas)=>({id:u(),nombre,entidad,responsable,tipo,saldo,cuota,estado,limite:limite||0,venc:venc||'',notas:notas||'',archivado:false});
  const S=(nombre,monto,vence,estado,responsable)=>({id:u(),nombre,monto,vence,estado,responsable});
- const C=(persona,banco,tipo,numero,moneda,estado,uso)=>({id:u(),persona,banco,tipo,numero,moneda,estado,uso:uso||'',saldo:0});
+ const C=(persona,banco,tipo,numero,moneda,estado,uso)=>({id:u(),persona,banco,tipo,numero,moneda,estado,uso:uso||'',saldo:0,archivado:false});
  return {
   ingresos:[
    {id:u(),persona:'Ricardo',monto:0,fuente:'Sueldo líquido (editar)'},
@@ -331,6 +332,8 @@ function load(){ try{const r=localStorage.getItem(KEY); if(r){const d=JSON.parse
   d.gastos=d.gastos||[]; d.metas=d.metas||[]; d.config=d.config||{passHash:null,passSalt:null};
   d.presupuesto=d.presupuesto||{}; d.histoIngresos=d.histoIngresos||{}; d.sync=d.sync||{enabled:false,url:'',room:''};
   d.updatedAt=d.updatedAt||0;
+  d.deudas.forEach(x=>{ if(x.archivado===undefined)x.archivado=false; });
+  d.cuentas.forEach(x=>{ if(x.archivado===undefined)x.archivado=false; });
   return d; }}}catch(e){} return seed(); }
 let db=load();
 function persist(){ try{localStorage.setItem(KEY,JSON.stringify(db));}catch(e){} }
@@ -414,6 +417,7 @@ function gastosDelMes(){ return gastoDeMes(mesActual()); }
 function ingresoFamiliar(){ return db.ingresos.reduce((a,i)=>a+(+i.monto||0),0); }
 function gastosPorCat(m){ const o={}; db.gastos.filter(g=>g.fecha&&g.fecha.startsWith(m)).forEach(g=>{o[g.categoria]=(o[g.categoria]||0)+(+g.monto||0);}); return o; }
 function totalAutoAporte(){ return db.metas.reduce((a,m)=>a+(+m.aporteAuto||0),0); }
+function cuentasActivas(){ return db.cuentas.filter(c=>!c.archivado); }
 function applyAutoAportes(){
  const m=mesActual(); let applied=0;
  db.metas.forEach(mt=>{
@@ -429,7 +433,7 @@ function applyAutoAportes(){
  return applied;
 }
 function stats(){
- const act=db.deudas.filter(d=>d.estado!=='Pagada');
+ const act=db.deudas.filter(d=>d.estado!=='Pagada' && !d.archivado);
  const deudaTotal=act.reduce((a,d)=>a+(+d.saldo||0),0);
  const cuotas=act.reduce((a,d)=>a+(+d.cuota||0),0);
  const mora=act.filter(d=>d.estado==='En mora');
@@ -448,7 +452,7 @@ function alertas(s){
  const A=[];
  if(s.ingresos<=0)A.push({t:'warn',x:'<b>Faltan ingresos:</b> regístrenlos en la página <a class="link" onclick="nav(\'ingresos\')">Ingresos</a> para activar proyecciones y consejos personalizados.'});
  if(s.mora.length)A.push({t:'bad',x:'<b>'+s.mora.length+' deudas en mora</b> por '+fmt(s.moraTotal)+'. Revisa la página de Consejos para ver el plan de pago sugerido.'});
- const ex=db.deudas.filter(d=>d.estado!=='Pagada'&&d.limite>0&&d.saldo>d.limite);
+ const ex=db.deudas.filter(d=>d.estado!=='Pagada'&&d.limite>0&&d.saldo>d.limite&&!d.archivado);
  if(ex.length)A.push({t:'warn',x:'<b>Sobregiro:</b> '+ex.map(d=>esc(d.nombre)).join(', ')+'. Eviten nuevas compras con esas tarjetas.'});
  db.servicios.filter(x=>x.estado!=='Pagada'&&x.vence).forEach(x=>{ const d=diasHasta(x.vence); if(d<0)A.push({t:'bad',x:'<b>'+esc(x.nombre)+'</b> venció hace '+(-d)+' días ('+fmt(x.monto)+').'}); else if(d<=7)A.push({t:'warn',x:'<b>'+esc(x.nombre)+'</b> vence en '+d+' día(s) ('+fmt(x.monto)+').'}); });
  if(s.carga!=null&&s.carga>0.5)A.push({t:'bad',x:'<b>Carga financiera crítica:</b> el '+Math.round(s.carga*100)+'% de los ingresos se va en obligaciones (recomendado: bajo 35%).'});
@@ -496,7 +500,7 @@ function drawDash(){
  const items=PERSONAS.map((p,i)=>({label:p,value:s.porPersona[p],color:['#6d7ff5','#22d3ee'][i]})).filter(i=>i.value>0);
  donut($('#cDonut'),items,fmt(s.deudaTotal));
  $('#donutLeg').innerHTML=items.map(i=>'<div class="lrow"><span class="dot" style="background:'+i.color+'"></span>'+i.label+' <b>'+fmt(i.value)+'</b> <span class="mut">'+(s.deudaTotal?Math.round(i.value/s.deudaTotal*100):0)+'%</span></div>').join('')||'<span class="mut">Sin deudas 🎉</span>';
- const top=db.deudas.filter(d=>d.estado!=='Pagada').sort((a,b)=>b.saldo-a.saldo).slice(0,6);
+ const top=db.deudas.filter(d=>d.estado!=='Pagada'&&!d.archivado).sort((a,b)=>b.saldo-a.saldo).slice(0,6);
  const mx=top.length?top[0].saldo:1;
  $('#topDeudas').innerHTML=top.map(d=>'<div class="bar-row"><div>'+esc(d.nombre)+' <span class="mut small">('+esc(d.responsable)+')</span></div><div class="bar-track"><div class="bar-fill" style="width:'+Math.max(4,d.saldo/mx*100)+'%"></div></div><div class="bar-val">'+fmt(d.saldo)+'</div></div>').join('')||'<span class="mut">Sin deudas activas.</span>';
 }
@@ -508,18 +512,18 @@ function vDeudas(){
  +'<select onchange="fD.resp=this.value;fillDeudas()"><option value="">👥 Todos</option>'+PERSONAS.map(p=>'<option '+(fD.resp===p?'selected':'')+'>'+p+'</option>').join('')+'</select>'
  +'<select onchange="fD.est=this.value;fillDeudas()"><option value="">Todos los estados</option>'+['Activa','En mora','Pagada'].map(e=>'<option '+(fD.est===e?'selected':'')+'>'+e+'</option>').join('')+'</select>'
  +'<input type="search" placeholder="🔍 Buscar deuda o entidad…" value="'+esc(fD.q)+'" oninput="fD.q=this.value;fillDeudas()">'
- +'<span class="spacer"></span><button class="btn primary" onclick="deudaModal()">＋ Nueva deuda</button></div>'
+ +'<span class="spacer"></span><button class="btn" onclick="nav(\'archivo\')">🗄️ Ver archivadas</button><button class="btn primary" onclick="deudaModal()">＋ Nueva deuda</button></div>'
  +'<div id="deudas-list"></div>';
 }
 function fillDeudas(){
  const s=stats();
  const q=fD.q.toLowerCase();
- const list=db.deudas.filter(d=>(!fD.resp||d.responsable===fD.resp)&&(!fD.est||d.estado===fD.est)&&(!q||(d.nombre+' '+d.entidad).toLowerCase().includes(q)));
+ const list=db.deudas.filter(d=>!d.archivado&&(!fD.resp||d.responsable===fD.resp)&&(!fD.est||d.estado===fD.est)&&(!q||(d.nombre+' '+d.entidad).toLowerCase().includes(q)));
  $('#deudas-list').innerHTML='<div class="chips"><span class="chip">Total activo: <b>'+fmt(s.deudaTotal)+'</b></span><span class="chip">Cuotas/mes: <b>'+fmt(s.cuotas)+'</b></span><span class="chip">En mora: <b>'+fmt(s.moraTotal)+'</b></span></div>'
  +'<div class="card nopad"><div class="tscroll"><table class="tbl"><thead><tr><th>Deuda</th><th>Entidad</th><th>Responsable</th><th>Saldo</th><th>Cuota/mes</th><th>Cupo usado</th><th>Estado</th><th></th></tr></thead><tbody>'
  +list.map(d=>{
    const uso=d.limite>0?Math.round(d.saldo/d.limite*100)+'%':'—';
-   return '<tr><td><b>'+esc(d.nombre)+'</b><div class="mut small">'+esc(d.tipo)+'</div></td><td>'+esc(d.entidad)+'</td><td>'+esc(d.responsable)+'</td><td>'+fmt(d.saldo)+'</td><td>'+fmt(d.cuota)+'</td><td class="'+(d.limite>0&&d.saldo>d.limite?'bad-t':'')+'">'+uso+'</td><td>'+badge(d.estado)+'</td><td class="acts"><button class="ibtn" onclick="deudaModal(\''+d.id+'\')">✏️</button><button class="ibtn" onclick="delDeuda(\''+d.id+'\')">🗑️</button></td></tr>';
+   return '<tr><td><b>'+esc(d.nombre)+'</b><div class="mut small">'+esc(d.tipo)+'</div></td><td>'+esc(d.entidad)+'</td><td>'+esc(d.responsable)+'</td><td>'+fmt(d.saldo)+'</td><td>'+fmt(d.cuota)+'</td><td class="'+(d.limite>0&&d.saldo>d.limite?'bad-t':'')+'">'+uso+'</td><td>'+badge(d.estado)+'</td><td class="acts"><button class="ibtn" onclick="deudaModal(\''+d.id+'\')">✏️</button><button class="ibtn" title="Archivar" onclick="archDeuda(\''+d.id+'\')">📦</button><button class="ibtn" title="Eliminar" onclick="delDeuda(\''+d.id+'\')">🗑️</button></td></tr>';
  }).join('')
  +'</tbody></table></div></div>';
 }
@@ -535,9 +539,10 @@ function deudaModal(id){
   {n:'limite',l:'Cupo / Límite ($) — opcional',type:'number'},
   {n:'venc',l:'Próximo vencimiento',type:'date'},
   {n:'estado',l:'Estado',type:'select',opts:['Activa','En mora','Pagada']}
- ],submit:data=>{ if(id)Object.assign(d,data); else db.deudas.push({id:uid(),notas:'',...data}); save(); }});
+ ],submit:data=>{ if(id)Object.assign(d,data); else db.deudas.push({id:uid(),notas:'',archivado:false,...data}); save(); }});
 }
-function delDeuda(id){ const d=db.deudas.find(x=>x.id===id); if(confirm('¿Eliminar "'+d.nombre+'"?')){ db.deudas=db.deudas.filter(x=>x.id!==id); save(); fillDeudas(); } }
+function delDeuda(id){ const d=db.deudas.find(x=>x.id===id); if(confirm('¿Eliminar "'+d.nombre+'"? Si prefieres solo ocultarla, usa 📦 Archivar.')){ db.deudas=db.deudas.filter(x=>x.id!==id); save(); fillDeudas(); } }
+function archDeuda(id){ const d=db.deudas.find(x=>x.id===id); if(confirm('¿Archivar "'+d.nombre+'"? Dejará de mostrarse y de contar en los totales. Podrás recuperarla en 🗄️ Archivo.')){ d.archivado=true; save(); fillDeudas(); } }
 
 /* --- Servicios --- */
 function vServicios(){
@@ -696,16 +701,16 @@ function vCuentas(){
  return '<div class="toolbar">'
  +'<select onchange="fC.resp=this.value;fillCuentas()"><option value="">👥 Ambos</option>'+PERSONAS.map(p=>'<option '+(fC.resp===p?'selected':'')+'>'+p+'</option>').join('')+'</select>'
  +'<button class="btn" id="btnVer" onclick="toggleNum()">'+(verNumeros?'🙈 Ocultar números':'👁️ Ver números completos')+'</button>'
- +'<span class="spacer"></span><button class="btn primary" onclick="cuentaModal()">＋ Nueva cuenta</button></div>'
+ +'<span class="spacer"></span><button class="btn" onclick="nav(\'archivo\')">🗄️ Ver archivadas</button><button class="btn primary" onclick="cuentaModal()">＋ Nueva cuenta</button></div>'
  +'<div id="cuentas-list"></div>';
 }
 function toggleNum(){ verNumeros=!verNumeros; $('#btnVer').textContent=verNumeros?'🙈 Ocultar números':'👁️ Ver números completos'; fillCuentas(); }
 function mask(n){ n=String(n||''); return n.length>4?'•••• '+n.slice(-4):(n||'—'); }
 function fillCuentas(){
- const list=db.cuentas.filter(c=>!fC.resp||c.persona===fC.resp);
- $('#cuentas-list').innerHTML='<div class="chips"><span class="chip">Total: <b>'+db.cuentas.length+'</b></span><span class="chip">Ricardo: <b>'+db.cuentas.filter(c=>c.persona==='Ricardo').length+'</b></span><span class="chip">Elías: <b>'+db.cuentas.filter(c=>c.persona==='Elías').length+'</b></span><span class="chip">Activas: <b>'+db.cuentas.filter(c=>c.estado==='Activa').length+'</b></span></div>'
+ const list=cuentasActivas().filter(c=>!fC.resp||c.persona===fC.resp);
+ $('#cuentas-list').innerHTML='<div class="chips"><span class="chip">Total activas: <b>'+cuentasActivas().length+'</b></span><span class="chip">Ricardo: <b>'+cuentasActivas().filter(c=>c.persona==='Ricardo').length+'</b></span><span class="chip">Elías: <b>'+cuentasActivas().filter(c=>c.persona==='Elías').length+'</b></span><span class="chip">Archivadas: <b>'+db.cuentas.filter(c=>c.archivado).length+'</b></span></div>'
  +'<div class="card nopad"><div class="tscroll"><table class="tbl"><thead><tr><th>Persona</th><th>Banco</th><th>Tipo</th><th>Número</th><th>Moneda</th><th>Estado</th><th>Uso / Nota</th><th></th></tr></thead><tbody>'
- +list.map(c=>'<tr><td>'+esc(c.persona)+'</td><td><b>'+esc(c.banco)+'</b></td><td>'+esc(c.tipo)+'</td><td style="font-family:ui-monospace,monospace">'+(verNumeros?esc(c.numero):mask(c.numero))+'</td><td>'+esc(c.moneda)+'</td><td>'+(c.estado==='Activa'?'<span class="b ok">Activa</span>':c.estado==='Bloqueada'?'<span class="b bad">Bloqueada</span>':'<span class="b warn">Inactiva</span>')+'</td><td class="mut small">'+esc(c.uso)+'</td><td class="acts"><button class="ibtn" onclick="cuentaModal(\''+c.id+'\')">✏️</button><button class="ibtn" onclick="delCuenta(\''+c.id+'\')">🗑️</button></td></tr>').join('')
+ +list.map(c=>'<tr><td>'+esc(c.persona)+'</td><td><b>'+esc(c.banco)+'</b></td><td>'+esc(c.tipo)+'</td><td style="font-family:ui-monospace,monospace">'+(verNumeros?esc(c.numero):mask(c.numero))+'</td><td>'+esc(c.moneda)+'</td><td>'+(c.estado==='Activa'?'<span class="b ok">Activa</span>':c.estado==='Bloqueada'?'<span class="b bad">Bloqueada</span>':'<span class="b warn">Inactiva</span>')+'</td><td class="mut small">'+esc(c.uso)+'</td><td class="acts"><button class="ibtn" onclick="cuentaModal(\''+c.id+'\')">✏️</button><button class="ibtn" title="Archivar" onclick="archCuenta(\''+c.id+'\')">📦</button><button class="ibtn" title="Eliminar" onclick="delCuenta(\''+c.id+'\')">🗑️</button></td></tr>').join('')
  +'</tbody></table></div></div>';
 }
 function cuentaModal(id){
@@ -718,9 +723,10 @@ function cuentaModal(id){
   {n:'moneda',l:'Moneda',type:'select',opts:['CLP','USD','UF']},
   {n:'estado',l:'Estado',type:'select',opts:['Activa','Inactiva','Bloqueada']},
   {n:'uso',l:'Uso principal / nota'}
- ],submit:data=>{ if(id)Object.assign(c,data); else db.cuentas.push({id:uid(),saldo:0,...data}); save(); }});
+ ],submit:data=>{ if(id)Object.assign(c,data); else db.cuentas.push({id:uid(),saldo:0,archivado:false,...data}); save(); }});
 }
-function delCuenta(id){ const c=db.cuentas.find(x=>x.id===id); if(confirm('¿Eliminar la cuenta de '+c.banco+'?')){ db.cuentas=db.cuentas.filter(x=>x.id!==id); save(); fillCuentas(); } }
+function delCuenta(id){ const c=db.cuentas.find(x=>x.id===id); if(confirm('¿Eliminar la cuenta de '+c.banco+'? Si prefieres solo ocultarla, usa 📦 Archivar.')){ db.cuentas=db.cuentas.filter(x=>x.id!==id); save(); fillCuentas(); } }
+function archCuenta(id){ const c=db.cuentas.find(x=>x.id===id); if(confirm('¿Archivar la cuenta de '+c.banco+'? Dejará de mostrarse. Podrás recuperarla en 🗄️ Archivo.')){ c.archivado=true; save(); fillCuentas(); } }
 
 /* --- Ingresos --- */
 function vIngresos(){
@@ -907,27 +913,59 @@ function genConsejos(s){
   if(s.deudaTotal>s.ingresos*10)C.push({nivel:'warn',icon:'🔁',titulo:'Evalúen consolidar deudas',texto:'La deuda equivale a '+(s.deudaTotal/s.ingresos).toFixed(0)+' meses de ingreso. Un crédito consolidado podría reducir cuota e intereses.'});
  }
  if(s.mora.length)C.push({nivel:'bad',icon:'🚨',titulo:s.mora.length+' deudas en mora ('+fmt(s.moraTotal)+')',texto:s.mora.map(d=>d.nombre).join(', ')+'. Contacten a cada entidad para repactar en cuotas fijas.'});
- const ex=db.deudas.filter(d=>d.estado!=='Pagada'&&d.limite>0&&d.saldo>d.limite);
+ const ex=db.deudas.filter(d=>d.estado!=='Pagada'&&d.limite>0&&d.saldo>d.limite&&!d.archivado);
  if(ex.length)C.push({nivel:'warn',icon:'💳',titulo:'Tarjetas sobre su cupo',texto:ex.map(d=>d.nombre).join(', ')+' están sobre su límite. Mantengan el uso bajo el 30% del cupo.'});
  const objetivo=s.obligaciones*3;
  if(objetivo>0)C.push({nivel:'info',icon:'🛡️',titulo:'Fondo de emergencia recomendado',texto:'Apunten a '+fmt(objetivo)+' (3 meses de obligaciones). Usen cuentas líquidas como BancoEstado o Renta Diaria de Scotiabank.'});
  const overB=Object.entries(db.presupuesto||{}).filter(([c,l])=>l>0&&(gC[c]||0)>l);
  if(overB.length)C.push({nivel:'warn',icon:'🎛️',titulo:'Presupuestos excedidos: '+overB.length+' categoría(s)',texto:overB.map(([c,l])=>c+' ('+fmt(gC[c])+' de '+fmt(l)+')').join(', ')+'.'});
- if(s.autoAporte>0)C.push({nivel:'ok',icon:'⚡',titulo:'Ahorro automático activo: '+fmt(s.autoAporte)+'/mes',texto:'Tienen aportes automáticos programados a sus metas. Se aplican una vez al mes y ya están descontados del "Libre del mes". ¡Automatizar es la mejor forma de ahorrar!'});
+ if(s.autoAporte>0)C.push({nivel:'ok',icon:'⚡',titulo:'Ahorro automático activo: '+fmt(s.autoAporte)+'/mes',texto:'Tienen aportes automáticos programados a sus metas. Se aplican una vez al mes y ya están descontados del "Libre del mes".'});
  else C.push({nivel:'info',icon:'⚡',titulo:'Activen el ahorro automático',texto:'En Metas, asignen un "aporte automático mensual" a cada meta. Se descontará de su presupuesto y se aplicará solo cada mes.'});
  if(db.metas.length){ const ah=db.metas.reduce((a,mt)=>a+(+mt.ahorrado||0),0); const obj=db.metas.reduce((a,mt)=>a+(+mt.objetivo||0),0);
   C.push({nivel:'info',icon:'🎯',titulo:'Metas de ahorro: '+Math.round(ah/(obj||1)*100)+'% de avance',texto:'Llevan '+fmt(ah)+' de '+fmt(obj)+' en '+db.metas.length+' meta(s).'}); }
- if(db.cuentas.length>25)C.push({nivel:'info',icon:'🏦',titulo:db.cuentas.length+' cuentas registradas',texto:'Revisen cuáles no usan hace 6+ meses y considérenlas cerrar para simplificar el control.'});
+ const cAct=cuentasActivas();
+ if(cAct.length>25)C.push({nivel:'info',icon:'🏦',titulo:cAct.length+' cuentas activas registradas',texto:'Revisen cuáles no usan hace 6+ meses y archívenlas (📦) para simplificar el control. Las prepago sin uso suelen ser fáciles de cerrar.'});
  return C;
 }
 function vConsejos(){
  const s=stats(); const C=genConsejos(s);
- const plan=db.deudas.filter(d=>d.estado!=='Pagada').sort((a,b)=>a.saldo-b.saldo);
+ const plan=db.deudas.filter(d=>d.estado!=='Pagada'&&!d.archivado).sort((a,b)=>a.saldo-b.saldo);
  return C.map(c=>'<div class="card consejo '+c.nivel+'"><div class="cicon">'+c.icon+'</div><div><h3>'+c.titulo+'</h3><p class="mut">'+c.texto+'</p></div></div>').join('')
  +(plan.length?'<div class="card"><h3>🧊 Método "Bola de Nieve" sugerido</h3><div class="tscroll"><table class="tbl"><thead><tr><th>#</th><th>Deuda</th><th>Responsable</th><th>Saldo</th><th>Cuota</th></tr></thead><tbody>'
  +plan.map((d,i)=>'<tr><td><b>'+(i+1)+'</b></td><td>'+esc(d.nombre)+'</td><td>'+esc(d.responsable)+'</td><td>'+fmt(d.saldo)+'</td><td>'+fmt(d.cuota)+'</td></tr>').join('')
  +'</tbody></table></div></div>':'');
 }
+
+/* --- Archivo --- */
+function vArchivo(){
+ return '<div class="toolbar"><span class="chip" id="arch-chip"></span><span class="spacer"></span><span class="mut small">Lo archivado no se muestra en los listados ni cuenta en el Dashboard. Puedes desarchivarlo (↩️) o eliminarlo definitivamente (🗑️).</span></div>'
+ +'<div id="arch-list"></div>';
+}
+function fillArchivo(){
+ const dArch=db.deudas.filter(d=>d.archivado);
+ const cArch=db.cuentas.filter(c=>c.archivado);
+ $('#arch-chip').innerHTML='Deudas archivadas: <b>'+dArch.length+'</b> &nbsp;·&nbsp; Cuentas archivadas: <b>'+cArch.length+'</b>';
+ let html='';
+ html+='<div class="card"><h3>💳 Deudas archivadas</h3>';
+ if(dArch.length){
+  html+='<div class="tscroll"><table class="tbl"><thead><tr><th>Deuda</th><th>Entidad</th><th>Responsable</th><th>Saldo</th><th>Estado</th><th></th></tr></thead><tbody>';
+  html+=dArch.map(d=>'<tr><td><b>'+esc(d.nombre)+'</b><div class="mut small">'+esc(d.tipo)+'</div></td><td>'+esc(d.entidad)+'</td><td>'+esc(d.responsable)+'</td><td>'+fmt(d.saldo)+'</td><td>'+badge(d.estado)+'</td><td class="acts"><button class="ibtn" title="Desarchivar" onclick="unarchDeuda(\''+d.id+'\')">↩️</button><button class="ibtn" title="Eliminar definitivamente" onclick="hardDelDeuda(\''+d.id+'\')">🗑️</button></td></tr>').join('');
+  html+='</tbody></table></div>';
+ } else html+='<p class="mut">No hay deudas archivadas.</p>';
+ html+='</div>';
+ html+='<div class="card"><h3>🏦 Cuentas archivadas</h3>';
+ if(cArch.length){
+  html+='<div class="tscroll"><table class="tbl"><thead><tr><th>Persona</th><th>Banco</th><th>Tipo</th><th>Número</th><th>Moneda</th><th>Estado</th><th></th></tr></thead><tbody>';
+  html+=cArch.map(c=>'<tr><td>'+esc(c.persona)+'</td><td><b>'+esc(c.banco)+'</b></td><td>'+esc(c.tipo)+'</td><td style="font-family:ui-monospace,monospace">'+mask(c.numero)+'</td><td>'+esc(c.moneda)+'</td><td>'+(c.estado==='Activa'?'<span class="b ok">Activa</span>':c.estado==='Bloqueada'?'<span class="b bad">Bloqueada</span>':'<span class="b warn">Inactiva</span>')+'</td><td class="acts"><button class="ibtn" title="Desarchivar" onclick="unarchCuenta(\''+c.id+'\')">↩️</button><button class="ibtn" title="Eliminar definitivamente" onclick="hardDelCuenta(\''+c.id+'\')">🗑️</button></td></tr>').join('');
+  html+='</tbody></table></div>';
+ } else html+='<p class="mut">No hay cuentas archivadas.</p>';
+ html+='</div>';
+ $('#arch-list').innerHTML=html;
+}
+function unarchDeuda(id){ const d=db.deudas.find(x=>x.id===id); d.archivado=false; save(); fillArchivo(); }
+function hardDelDeuda(id){ const d=db.deudas.find(x=>x.id===id); if(confirm('¿ELIMINAR DEFINITIVAMENTE "'+d.nombre+'"? Esta acción no se puede deshacer.')){ db.deudas=db.deudas.filter(x=>x.id!==id); save(); fillArchivo(); } }
+function unarchCuenta(id){ const c=db.cuentas.find(x=>x.id===id); c.archivado=false; save(); fillArchivo(); }
+function hardDelCuenta(id){ const c=db.cuentas.find(x=>x.id===id); if(confirm('¿ELIMINAR DEFINITIVAMENTE la cuenta de '+c.banco+'? Esta acción no se puede deshacer.')){ db.cuentas=db.cuentas.filter(x=>x.id!==id); save(); fillArchivo(); } }
 
 /* --- Ajustes --- */
 function vAjustes(){
@@ -991,6 +1029,9 @@ function aplicarImport(d){
  db=d;
  db.gastos=db.gastos||[]; db.metas=db.metas||[]; db.config=db.config||{passHash:null,passSalt:null};
  db.presupuesto=db.presupuesto||{}; db.histoIngresos=db.histoIngresos||{}; db.sync=db.sync||{enabled:false,url:'',room:''};
+ db.deudas=db.deudas||[]; db.cuentas=db.cuentas||[];
+ db.deudas.forEach(x=>{ if(x.archivado===undefined)x.archivado=false; });
+ db.cuentas.forEach(x=>{ if(x.archivado===undefined)x.archivado=false; });
  persist(); render();
 }
 function importar(inp){
@@ -1037,8 +1078,8 @@ function showModal(o){
 function closeModal(){ $('#modal').innerHTML=''; }
 
 /* ============ ROUTER ============ */
-const VIEWS={dashboard:vDashboard,deudas:vDeudas,servicios:vServicios,gastos:vGastos,historico:vHist,cuentas:vCuentas,ingresos:vIngresos,metas:vMetas,proyecciones:vProy,consejos:vConsejos,ajustes:vAjustes};
-const TITLES={dashboard:'📊 Dashboard',deudas:'💳 Deudas',servicios:'🔌 Servicios y pagos',gastos:'💸 Gastos variables',historico:'📉 Histórico mensual',cuentas:'🏦 Cuentas',ingresos:'💵 Ingresos',metas:'🎯 Metas de ahorro',proyecciones:'📈 Proyecciones',consejos:'💡 Consejos financieros',ajustes:'⚙️ Ajustes'};
+const VIEWS={dashboard:vDashboard,deudas:vDeudas,servicios:vServicios,gastos:vGastos,historico:vHist,cuentas:vCuentas,ingresos:vIngresos,metas:vMetas,proyecciones:vProy,consejos:vConsejos,archivo:vArchivo,ajustes:vAjustes};
+const TITLES={dashboard:'📊 Dashboard',deudas:'💳 Deudas',servicios:'🔌 Servicios y pagos',gastos:'💸 Gastos variables',historico:'📉 Histórico mensual',cuentas:'🏦 Cuentas',ingresos:'💵 Ingresos',metas:'🎯 Metas de ahorro',proyecciones:'📈 Proyecciones',consejos:'💡 Consejos financieros',archivo:'🗄️ Archivo',ajustes:'⚙️ Ajustes'};
 let view='dashboard';
 function nav(v){
  view=v;
@@ -1053,6 +1094,7 @@ function nav(v){
  if(v==='cuentas')fillCuentas();
  if(v==='metas')fillMetas();
  if(v==='proyecciones'){ calcAhorro(); calcDeuda(); }
+ if(v==='archivo')fillArchivo();
  if(v==='ajustes')updateSyncUI();
  window.scrollTo(0,0);
 }
