@@ -46,8 +46,9 @@ header h1{font-size:1.35rem}.date{color:var(--mut);font-size:.85rem;text-transfo
 .ibtn:hover{opacity:1;background:#1a2342}
 .acts{white-space:nowrap;text-align:right}
 .toolbar{display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap}.toolbar .spacer{flex:1}
-select,input[type=text],input[type=number],input[type=date],input[type=search],input[type=password],input[type=month]{background:var(--p2);border:1px solid var(--br);color:var(--tx);padding:9px 12px;border-radius:10px;font-size:.85rem;outline:none}
-select:focus,input:focus{border-color:var(--acc)}
+select,input[type=text],input[type=number],input[type=date],input[type=search],input[type=password],input[type=month],textarea{background:var(--p2);border:1px solid var(--br);color:var(--tx);padding:9px 12px;border-radius:10px;font-size:.85rem;outline:none;font-family:inherit}
+select:focus,input:focus,textarea:focus{border-color:var(--acc)}
+textarea{width:100%;min-height:80px;resize:vertical}
 .chips{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
 .chip{background:var(--p);border:1px solid var(--br);padding:8px 14px;border-radius:999px;font-size:.82rem;color:var(--mut)}.chip b{color:var(--tx)}
 .mut{color:var(--mut)}.small{font-size:.75rem}.center{text-align:center}
@@ -82,13 +83,15 @@ canvas{width:100%;display:block}
 #modal .box{background:var(--p);border:1px solid var(--br);border-radius:16px;padding:22px;width:100%;max-width:540px;max-height:90vh;overflow:auto}
 #modal h3{margin-bottom:16px}
 #modal label{display:block;font-size:.78rem;color:var(--mut);margin-bottom:12px}
-#modal input,#modal select{width:100%;margin-top:6px}
+#modal input,#modal select,#modal textarea{width:100%;margin-top:6px}
 .acts2{display:flex;justify-content:flex-end;gap:10px;margin-top:8px}
 ul{padding-left:20px;line-height:1.8}
 #lockScreen{position:fixed;inset:0;z-index:100;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:20px}
 .lockbox{background:var(--p);border:1px solid var(--br);border-radius:20px;padding:36px 32px;max-width:360px;width:100%;text-align:center;display:flex;flex-direction:column;gap:14px;align-items:center}
 .lockbox .lg{width:64px;height:64px;font-size:32px;border-radius:16px;background:linear-gradient(135deg,var(--acc),var(--cy));display:flex;align-items:center;justify-content:center}
 .lockbox h2{font-size:1.2rem}.lockbox input{width:100%}.lockbox button{width:100%}
+.hist-mini{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.hist-chip{background:var(--p2);border:1px solid var(--br);border-radius:8px;padding:3px 8px;font-size:.68rem;color:var(--mut)}
 @media(max-width:980px){
  #app{flex-direction:column}
  aside{width:100%;height:auto;position:static;flex-direction:row;align-items:center;gap:10px;padding:12px}
@@ -129,7 +132,7 @@ ul{padding-left:20px;line-height:1.8}
    <a class="ni" data-v="consejos" onclick="nav('consejos')">💡 Consejos</a>
    <a class="ni" data-v="ajustes" onclick="nav('ajustes')">⚙️ Ajustes</a>
   </nav>
-  <div class="side-foot">Hecho para el hogar 💙<br>Los datos viven solo en tu navegador.</div>
+  <div class="side-foot">Hecho para el hogar 💙<br>Los datos viven en tu navegador.</div>
  </aside>
  <main>
   <header><h1 id="title">📊 Dashboard</h1><div class="date" id="hoy"></div></header>
@@ -140,7 +143,7 @@ ul{padding-left:20px;line-height:1.8}
 
 <script>
 'use strict';
-/* ============ CRIPTOGRAFÍA (SHA-256 puro JS + respaldo cifrado) ============ */
+/* ============ CRIPTOGRAFÍA (SHA-256 puro JS) ============ */
 var sha256=function(ascii){
  function rightRotate(v,a){return (v>>>a)|(v<<(32-a));}
  var mathPow=Math.pow,maxWord=mathPow(2,32),len='length',i,j,result='';
@@ -319,22 +322,112 @@ function seed(){
   metas:[],
   presupuesto:{},
   histoIngresos:{},
+  sync:{enabled:false,url:'',room:''},
+  updatedAt:0,
   config:{passHash:null,passSalt:null}
  };
 }
 function load(){ try{const r=localStorage.getItem(KEY); if(r){const d=JSON.parse(r); if(d&&d.deudas&&d.cuentas){
   d.gastos=d.gastos||[]; d.metas=d.metas||[]; d.config=d.config||{passHash:null,passSalt:null};
-  d.presupuesto=d.presupuesto||{}; d.histoIngresos=d.histoIngresos||{};
+  d.presupuesto=d.presupuesto||{}; d.histoIngresos=d.histoIngresos||{}; d.sync=d.sync||{enabled:false,url:'',room:''};
+  d.updatedAt=d.updatedAt||0;
   return d; }}}catch(e){} return seed(); }
-function save(){ try{localStorage.setItem(KEY,JSON.stringify(db));}catch(e){} }
-let db=load(); save();
-let pendingBackup=null;
+let db=load();
+function persist(){ try{localStorage.setItem(KEY,JSON.stringify(db));}catch(e){} }
+persist();
+
+/* ============ SINCRONIZACIÓN EN LA NUBE (Firebase REST) ============ */
+let syncTimer=null, suppressPush=false;
+function syncReady(){ return db.sync&&db.sync.enabled&&db.sync.url&&db.sync.room; }
+function syncPath(){ return db.sync.url.replace(/\/$/,'')+'/'+db.sync.room+'/data.json'; }
+function pushCloud(){
+ if(!syncReady()||suppressPush)return;
+ fetch(syncPath(),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({updatedAt:db.updatedAt,payload:db})})
+  .then(()=>{ db.sync.lastSync=Date.now(); persist(); if(view==='ajustes')updateSyncUI(); })
+  .catch(()=>{});
+}
+function pullCloud(){
+ if(!syncReady())return;
+ fetch(syncPath()).then(r=>r.ok?r.json():null).then(remote=>{
+  if(remote&&remote.updatedAt&&remote.updatedAt>(db.updatedAt||0)){
+   suppressPush=true;
+   db=remote.payload; persist(); render();
+   setTimeout(()=>{suppressPush=false;},300);
+  }
+  if(remote){ db.sync=db.sync||{}; db.sync.lastSync=Date.now(); persist(); if(view==='ajustes')updateSyncUI(); }
+ }).catch(()=>{});
+}
+function startSync(){ if(syncTimer){clearInterval(syncTimer);syncTimer=null;} if(syncReady()){ pullCloud(); syncTimer=setInterval(pullCloud,10000); } }
+function save(){ db.updatedAt=Date.now(); persist(); pushCloud(); }
+function manualSync(){ if(!syncReady()){alert('Primero configura y activa la sincronización.');return;} pushCloud(); pullCloud(); alert('🔄 Sincronizando…'); }
+function genRoom(){ let s='';const c='abcdefghijkmnpqrstuvwxyz23456789';for(let i=0;i<12;i++)s+=c[Math.floor(Math.random()*c.length)];return s; }
+function syncConfigModal(){
+ showModal({title:'Configurar base de datos en la nube',values:{url:(db.sync&&db.sync.url)||''},fields:[
+  {n:'url',l:'URL de Firebase Realtime Database',ph:'https://tu-proyecto-default-rtdb.firebaseio.com'}
+ ],submit:data=>{
+  let u=(data.url||'').trim();
+  if(!u){ alert('Ingresa la URL de la base de datos.'); return false; }
+  if(!/^https:\/\//i.test(u)){ alert('La URL debe comenzar con https://'); return false; }
+  db.sync=db.sync||{}; db.sync.url=u.replace(/\/$/,'');
+  if(!db.sync.room)db.sync.room=genRoom();
+  save(); render();
+ }});
+}
+function syncCode(){ return btoa(unescape(encodeURIComponent(JSON.stringify({u:db.sync.url,r:db.sync.room})))); }
+function copySyncCode(){
+ if(!db.sync||!db.sync.url){ alert('Primero configura la base de datos.'); return; }
+ const c=syncCode();
+ if(navigator.clipboard){ navigator.clipboard.writeText(c).then(()=>alert('📋 Código copiado.\nPégalo en el otro dispositivo con "Vincular este dispositivo".')); }
+ else{ prompt('Copia este código:',c); }
+}
+function linkDeviceModal(){
+ showModal({title:'Vincular este dispositivo',values:{},fields:[
+  {n:'code',l:'Código de vinculación',ph:'Pega aquí el código copiado del otro dispositivo'}
+ ],submit:data=>{
+  try{
+   const o=JSON.parse(decodeURIComponent(escape(atob((data.code||'').trim()))));
+   if(!o.u||!o.r)throw 0;
+   db.sync=db.sync||{}; db.sync.url=o.u; db.sync.room=o.r; db.sync.enabled=true;
+   save(); startSync(); render(); alert('✅ Dispositivo vinculado y sincronización activada.');
+  }catch(e){ alert('Código inválido. Cópialo completo desde el otro dispositivo.'); return false; }
+ }});
+}
+function toggleSync(){
+ db.sync=db.sync||{};
+ if(!db.sync.url){ syncConfigModal(); return; }
+ db.sync.enabled=!db.sync.enabled; save();
+ if(db.sync.enabled)startSync(); else { if(syncTimer){clearInterval(syncTimer);syncTimer=null;} }
+ render();
+}
+function updateSyncUI(){
+ const st=$('#sync-status'); if(!st)return;
+ if(!db.sync||!db.sync.url){ st.innerHTML='<div class="al warn">No configurada. Presiona <b>"Configurar base de datos"</b> para comenzar.</div>'; }
+ else if(!db.sync.enabled){ st.innerHTML='<div class="al warn">Configurada pero <b>desactivada</b> · '+esc(db.sync.url.replace('https://',''))+'</div>'; }
+ else { st.innerHTML='<div class="al ok">☁️ Sincronización <b>activa</b> · Sala <b>'+esc(db.sync.room)+'</b>'+(db.sync.lastSync?' · Últ. movimiento: '+new Date(db.sync.lastSync).toLocaleTimeString('es-CL'):'')+'</div>'; }
+ const btn=$('#btnSyncToggle'); if(btn)btn.textContent=(db.sync&&db.sync.enabled)?'⏸️ Desactivar':'▶️ Activar';
+ const det=$('#sync-detail'); if(det)det.innerHTML=db.sync&&db.sync.url?('URL: '+esc(db.sync.url)+'<br>Para conectar el celular: en él abre la app → Ajustes → "Vincular este dispositivo" y pega el código.'):'Crea una base gratis en <b>firebase.google.com</b> → Realtime Database, copia su URL y pégala en "Configurar base de datos".';
+}
 
 /* ============ CÁLCULOS ============ */
 function gastoDeMes(m){ return db.gastos.filter(g=>g.fecha&&g.fecha.startsWith(m)).reduce((a,g)=>a+(+g.monto||0),0); }
 function gastosDelMes(){ return gastoDeMes(mesActual()); }
 function ingresoFamiliar(){ return db.ingresos.reduce((a,i)=>a+(+i.monto||0),0); }
 function gastosPorCat(m){ const o={}; db.gastos.filter(g=>g.fecha&&g.fecha.startsWith(m)).forEach(g=>{o[g.categoria]=(o[g.categoria]||0)+(+g.monto||0);}); return o; }
+function totalAutoAporte(){ return db.metas.reduce((a,m)=>a+(+m.aporteAuto||0),0); }
+function applyAutoAportes(){
+ const m=mesActual(); let applied=0;
+ db.metas.forEach(mt=>{
+  if(mt.aporteAuto>0 && mt.ultimoAporte!==m){
+   mt.ahorrado=(+mt.ahorrado||0)+(+mt.aporteAuto);
+   mt.historial=mt.historial||[];
+   mt.historial.push({mes:m,monto:+mt.aporteAuto,tipo:'auto'});
+   if(mt.historial.length>24)mt.historial=mt.historial.slice(-24);
+   mt.ultimoAporte=m; applied++;
+  }
+ });
+ if(applied>0){ db.updatedAt=Date.now(); persist(); pushCloud(); }
+ return applied;
+}
 function stats(){
  const act=db.deudas.filter(d=>d.estado!=='Pagada');
  const deudaTotal=act.reduce((a,d)=>a+(+d.saldo||0),0);
@@ -345,10 +438,11 @@ function stats(){
  const ingresos=ingresoFamiliar();
  const obligaciones=cuotas+servicios;
  const gastos=gastosDelMes();
+ const autoAporte=totalAutoAporte();
  const capacidad=ingresos-obligaciones;
  const carga=ingresos>0?obligaciones/ingresos:null;
  const porPersona={}; PERSONAS.forEach(p=>porPersona[p]=act.filter(d=>d.responsable===p).reduce((a,d)=>a+(+d.saldo||0),0));
- return {deudaTotal,cuotas,mora,moraTotal,servicios,ingresos,obligaciones,gastos,capacidad,carga,porPersona,nDeudas:act.length};
+ return {deudaTotal,cuotas,mora,moraTotal,servicios,ingresos,obligaciones,gastos,autoAporte,capacidad,carga,porPersona,nDeudas:act.length};
 }
 function alertas(s){
  const A=[];
@@ -375,14 +469,15 @@ function vDashboard(){
  const alerts=alertas(s);
  const venc=db.servicios.filter(x=>x.vence&&x.estado!=='Pagada').sort((a,b)=>a.vence<b.vence?-1:1).slice(0,6);
  const metasAh=db.metas.reduce((a,m)=>a+(+m.ahorrado||0),0);
- const libre=s.ingresos-s.obligaciones-s.gastos;
+ const libre=s.ingresos-s.obligaciones-s.gastos-s.autoAporte;
  return '<div class="kpis">'
  +kpi('💵','Ingresos mensuales',s.ingresos?fmt(s.ingresos):'Sin registrar','Ricardo + Elías',s.ingresos?'':'warn')
  +kpi('🏦','Deuda total activa',fmt(s.deudaTotal),s.nDeudas+' productos activos')
  +kpi('📅','Obligaciones del mes',fmt(s.obligaciones),'Cuotas '+fmt(s.cuotas)+' · Servicios '+fmt(s.servicios))
  +kpi('💸','Gastos variables',fmt(s.gastos),'Mes actual registrados')
- +kpi('🧮','Libre del mes',fmt(libre),s.ingresos?'Ingresos − obligaciones − gastos':'Registra ingresos',s.ingresos?(libre>=0?'ok':'bad'):'warn')
- +kpi('🎯','Ahorrado en metas',fmt(metasAh),db.metas.length+' meta(s)')
+ +kpi('🎯','Ahorro programado',fmt(s.autoAporte),'Aporte automático a metas')
+ +kpi('🧮','Libre del mes',fmt(libre),s.ingresos?'Ingresos − obligaciones − gastos − ahorro':'Registra ingresos',s.ingresos?(libre>=0?'ok':'bad'):'warn')
+ +kpi('🏅','Ahorrado en metas',fmt(metasAh),db.metas.length+' meta(s)')
  +kpi('🚨','Deudas en mora',fmt(s.moraTotal),s.mora.length+' deudas',s.mora.length?'bad':'ok')
  +kpi('⚖️','Carga financiera',pct,'Obligaciones / ingresos',cargaClass)
  +'</div>'
@@ -447,7 +542,7 @@ function delDeuda(id){ const d=db.deudas.find(x=>x.id===id); if(confirm('¿Elimi
 /* --- Servicios --- */
 function vServicios(){
  return '<div class="toolbar"><span class="chip" id="serv-chip"></span><span class="spacer"></span><button class="btn primary" onclick="servModal()">＋ Nuevo servicio</button></div><div id="serv-list"></div>'
- +'<div class="card"><h3>💡 Tip mensual</h3><p class="mut small">A comienzos de cada mes, actualicen montos y fechas de vencimiento, y marquen ✅ lo pagado. Así las alertas de vencimiento funcionan bien.</p></div>';
+ +'<div class="card"><h3>💡 Tip mensual</h3><p class="mut small">A comienzos de cada mes, actualicen montos y fechas de vencimiento, y marquen ✅ lo pagado.</p></div>';
 }
 function fillServ(){
  const pend=db.servicios.filter(x=>x.estado!=='Pagada');
@@ -476,7 +571,7 @@ function servModal(id){
 function toggleServ(id){ const s=db.servicios.find(x=>x.id===id); s.estado=s.estado==='Pagada'?'Pendiente':'Pagada'; save(); fillServ(); }
 function delServ(id){ const s=db.servicios.find(x=>x.id===id); if(confirm('¿Eliminar "'+s.nombre+'"?')){ db.servicios=db.servicios.filter(x=>x.id!==id); save(); fillServ(); } }
 
-/* --- Gastos variables + Presupuesto --- */
+/* --- Gastos + Presupuesto --- */
 const CATEGORIAS=['Supermercado','Transporte','Comida y Restaurant','Salud','Educación','Entretención','Ropa y Calzado','Hogar','Mascotas','Suscripciones','Otros'];
 const CAT_COLORS=['#34d399','#60a5fa','#f59e0b','#f87171','#a78bfa','#f472b6','#fbbf24','#38bdf8','#4ade80','#c084fc','#94a3b8'];
 const MEDIOS=['Efectivo','Débito','Crédito','Transferencia','Prepago/Billetera','Otro'];
@@ -502,9 +597,10 @@ function fillGastos(){
  list.forEach(g=>{ byCat[g.categoria]=(byCat[g.categoria]||0)+(+g.monto||0); });
  const entries=Object.entries(byCat).sort((a,b)=>b[1]-a[1]);
  const s=stats();
- const libre=s.ingresos-s.obligaciones-total;
+ const libre=s.ingresos-s.obligaciones-total-s.autoAporte;
  $('#gastos-sum').innerHTML='<div class="chips"><span class="chip">Total del período: <b>'+fmt(total)+'</b></span>'
- +(s.ingresos>0?'<span class="chip">Libre tras obligaciones y estos gastos: <b>'+fmt(libre)+'</b></span>':'')
+ +'<span class="chip">Ahorro programado: <b>'+fmt(s.autoAporte)+'</b></span>'
+ +(s.ingresos>0?'<span class="chip">Libre tras obligaciones, gastos y ahorro: <b>'+fmt(libre)+'</b></span>':'')
  +'</div>';
  fillPresu();
  donut($('#cGasto'), entries.map(([c,v])=>({label:c,value:v,color:CAT_COLORS[CATEGORIAS.indexOf(c)]||'#94a3b8'})), fmt(total));
@@ -520,7 +616,7 @@ function fillPresu(){
  const gCat=gastosPorCat(m);
  const entries=Object.entries(db.presupuesto||{}).filter(([c,l])=>l>0);
  if(!entries.length){
-  $('#presu-box').innerHTML='<div class="card"><h3>🎛️ Presupuesto del mes</h3><p class="mut">Aún no han definido límites por categoría. <button class="btn primary" style="margin-left:8px" onclick="presuModal()">Definir presupuestos</button> Establecer límites les dará alertas cuando se pasen.</p></div>';
+  $('#presu-box').innerHTML='<div class="card"><h3>🎛️ Presupuesto del mes</h3><p class="mut">Aún no han definido límites por categoría. <button class="btn primary" style="margin-left:8px" onclick="presuModal()">Definir presupuestos</button></p></div>';
   return;
  }
  const rows=entries.map(([c,l])=>{
@@ -556,7 +652,7 @@ function gastoModal(id){
 }
 function delGasto(id){ const g=db.gastos.find(x=>x.id===id); if(confirm('¿Eliminar gasto "'+g.desc+'"?')){ db.gastos=db.gastos.filter(x=>x.id!==id); save(); fillGastos(); } }
 
-/* --- Histórico mensual --- */
+/* --- Histórico --- */
 function vHist(){
  return '<div class="toolbar"><span class="chip" id="hist-chip"></span><span class="spacer"></span><span class="mut small">El ingreso de cada mes se edita con ✏️. Si no se registra, se asume el ingreso actual.</span></div>'
  +'<div class="card"><h3>📉 Ingresos vs Gastos por mes</h3><canvas id="cHist"></canvas>'
@@ -601,8 +697,7 @@ function vCuentas(){
  +'<select onchange="fC.resp=this.value;fillCuentas()"><option value="">👥 Ambos</option>'+PERSONAS.map(p=>'<option '+(fC.resp===p?'selected':'')+'>'+p+'</option>').join('')+'</select>'
  +'<button class="btn" id="btnVer" onclick="toggleNum()">'+(verNumeros?'🙈 Ocultar números':'👁️ Ver números completos')+'</button>'
  +'<span class="spacer"></span><button class="btn primary" onclick="cuentaModal()">＋ Nueva cuenta</button></div>'
- +'<div id="cuentas-list"></div>'
- +'<div class="card"><h3>🔐 Nota de seguridad</h3><p class="mut small">Esta app guarda los datos solo en tu navegador y <b>no almacena CVV</b>. Para datos ultrasensibles (CVV, PAN completo de tarjetas) sigan usando su bóveda cifrada (boveda_segura.html).</p></div>';
+ +'<div id="cuentas-list"></div>';
 }
 function toggleNum(){ verNumeros=!verNumeros; $('#btnVer').textContent=verNumeros?'🙈 Ocultar números':'👁️ Ver números completos'; fillCuentas(); }
 function mask(n){ n=String(n||''); return n.length>4?'•••• '+n.slice(-4):(n||'—'); }
@@ -632,8 +727,7 @@ function vIngresos(){
  const tot=ingresoFamiliar();
  return '<div class="chips"><span class="chip">Ingreso familiar mensual: <b>'+fmt(tot)+'</b></span></div>'
  +'<div class="grid2">'+db.ingresos.map(i=>'<div class="card"><div class="person-head"><span class="avatar">'+esc((i.persona||'?')[0])+'</span><div><h3>'+esc(i.persona)+'</h3><div class="mut small">'+esc(i.fuente||'Sin fuente definida')+'</div></div><button class="ibtn" style="margin-left:auto" onclick="ingModal(\''+i.id+'\')">✏️</button><button class="ibtn" onclick="delIng(\''+i.id+'\')">🗑️</button></div><div class="big">'+fmt(i.monto)+'</div><div class="mut small">mensual líquido</div></div>').join('')+'</div>'
- +'<div class="toolbar"><button class="btn primary" onclick="ingModal()">＋ Agregar ingreso</button></div>'
- +'<div class="card"><h3>ℹ️ ¿Por qué es importante?</h3><p class="mut">Los ingresos activan el cálculo de carga financiera, la capacidad de ahorro, las proyecciones y los consejos personalizados para ambos. Anoten el monto <b>líquido</b> mensual de cada uno.</p></div>';
+ +'<div class="toolbar"><button class="btn primary" onclick="ingModal()">＋ Agregar ingreso</button></div>';
 }
 function ingModal(id){
  const i=id?db.ingresos.find(x=>x.id===id):{};
@@ -645,58 +739,71 @@ function ingModal(id){
 }
 function delIng(id){ if(confirm('¿Eliminar este ingreso?')){ db.ingresos=db.ingresos.filter(x=>x.id!==id); save(); render(); } }
 
-/* --- Metas de ahorro --- */
+/* --- Metas con aporte automático --- */
 const META_COLORS=['#6d7ff5','#22d3ee','#34d399','#f59e0b','#f472b6','#a78bfa','#fbbf24','#38bdf8'];
 function vMetas(){
- return '<div class="toolbar"><span class="spacer"></span><button class="btn primary" onclick="metaModal()">＋ Nueva meta de ahorro</button></div>'
+ return '<div class="toolbar"><button class="btn" onclick="applyAndRender()">⚡ Aplicar aportes del mes</button><span class="spacer"></span><button class="btn primary" onclick="metaModal()">＋ Nueva meta de ahorro</button></div>'
  +'<div id="metas-sum"></div>'
  +'<div class="grid2" id="metas-grid"></div>';
 }
+function applyAndRender(){ const n=applyAutoAportes(); render(); if(n>0)alert('⚡ Se aplicaron '+n+' aporte(s) automático(s).'); else alert('No hay aportes pendientes este mes.'); }
 function fillMetas(){
  const totalAh=db.metas.reduce((a,m)=>a+(+m.ahorrado||0),0);
  const totalObj=db.metas.reduce((a,m)=>a+(+m.objetivo||0),0);
- $('#metas-sum').innerHTML='<div class="chips"><span class="chip">Total ahorrado: <b>'+fmt(totalAh)+'</b></span><span class="chip">Meta total: <b>'+fmt(totalObj)+'</b></span>'+(totalObj?'<span class="chip">Avance: <b>'+Math.round(totalAh/totalObj*100)+'%</b></span>':'')+'</div>';
- if(!db.metas.length){ $('#metas-grid').innerHTML='<div class="card" style="grid-column:1/-1"><p class="mut">Aún no tienen metas de ahorro. Creen la primera, por ejemplo un fondo de emergencia, un viaje o la cuota inicial de algo. 🎯</p></div>'; return; }
- $('#metas-grid').innerHTML=db.metas.map((m,i)=>{
-   const pct=Math.min(100,Math.round((+m.ahorrado||0)/(+m.objetivo||1)*100));
+ const autoMes=totalAutoAporte();
+ $('#metas-sum').innerHTML='<div class="chips"><span class="chip">Total ahorrado: <b>'+fmt(totalAh)+'</b></span><span class="chip">Meta total: <b>'+fmt(totalObj)+'</b></span>'+(totalObj?'<span class="chip">Avance: <b>'+Math.round(totalAh/totalObj*100)+'%</b></span>':'')+'<span class="chip">Aporte automático: <b>'+fmt(autoMes)+'/mes</b></span></div>';
+ if(!db.metas.length){ $('#metas-grid').innerHTML='<div class="card" style="grid-column:1/-1"><p class="mut">Aún no tienen metas de ahorro. Creen la primera, por ejemplo un fondo de emergencia o un viaje. 🎯</p></div>'; return; }
+ const m=mesActual();
+ $('#metas-grid').innerHTML=db.metas.map((mt,i)=>{
+   const pct=Math.min(100,Math.round((+mt.ahorrado||0)/(+mt.objetivo||1)*100));
    const color=META_COLORS[i%META_COLORS.length];
-   const faltante=Math.max(0,(+m.objetivo||0)-(+m.ahorrado||0));
+   const faltante=Math.max(0,(+mt.objetivo||0)-(+mt.ahorrado||0));
    let guia='';
-   if(m.plazo&&faltante>0){
-     const plazo=new Date(m.plazo+'T00:00:00');
+   if(mt.plazo&&faltante>0){
+     const plazo=new Date(mt.plazo+'T00:00:00');
      const months=Math.max(1,Math.round((plazo-new Date())/(30*864e5)));
      const req=faltante/months;
-     guia='<p class="mut small" style="margin-top:8px">Para llegar al '+fdate(m.plazo)+' necesitan ahorrar ~<b style="color:'+color+'">'+fmt(req)+'/mes</b> ('+months+' meses).</p>';
+     guia='<p class="mut small" style="margin-top:8px">Para llegar al '+fdate(mt.plazo)+' necesitan ~<b style="color:'+color+'">'+fmt(req)+'/mes</b>.</p>';
    } else if(faltante<=0){
      guia='<p class="small" style="margin-top:8px;color:#2dd4a7">✅ ¡Meta cumplida!</p>';
    }
+   const autoBadge=mt.aporteAuto>0?(mt.ultimoAporte===m?'<span class="b ok">Aporte del mes aplicado</span>':'<span class="b warn">Aporte del mes pendiente</span>'):'';
+   const hist=(mt.historial||[]).slice(-4).reverse().map(h=>'<span class="hist-chip">'+mesLabelCorto(h.mes)+' +'+fmt(h.monto)+(h.tipo==='auto'?' ⚡':' ✋')+'</span>').join('');
    return '<div class="card">'
-     +'<div class="person-head"><span class="avatar" style="background:'+color+'">'+esc((m.nombre||'?')[0])+'</span><div><h3>'+esc(m.nombre)+'</h3><div class="mut small">'+esc(m.responsable||'—')+'</div></div>'
-     +'<div style="margin-left:auto" class="acts"><button class="ibtn" title="Abonar" onclick="abonoModal(\''+m.id+'\')">💰</button><button class="ibtn" onclick="metaModal(\''+m.id+'\')">✏️</button><button class="ibtn" onclick="delMeta(\''+m.id+'\')">🗑️</button></div></div>'
+     +'<div class="person-head"><span class="avatar" style="background:'+color+'">'+esc((mt.nombre||'?')[0])+'</span><div><h3>'+esc(mt.nombre)+'</h3><div class="mut small">'+esc(mt.responsable||'—')+'</div></div>'
+     +'<div style="margin-left:auto" class="acts"><button class="ibtn" title="Abonar" onclick="abonoModal(\''+mt.id+'\')">💰</button><button class="ibtn" onclick="metaModal(\''+mt.id+'\')">✏️</button><button class="ibtn" onclick="delMeta(\''+mt.id+'\')">🗑️</button></div></div>'
      +'<div class="big" style="color:'+color+'">'+pct+'%</div>'
      +'<div class="bar-track" style="height:14px;margin:8px 0"><div class="bar-fill" style="width:'+pct+'%;background:'+color+'"></div></div>'
-     +'<div class="mut small">Ahorrado: <b>'+fmt(m.ahorrado)+'</b> de '+fmt(m.objetivo)+' · Falta: <b>'+fmt(faltante)+'</b></div>'
+     +'<div class="mut small">Ahorrado: <b>'+fmt(mt.ahorrado)+'</b> de '+fmt(mt.objetivo)+' · Falta: <b>'+fmt(faltante)+'</b></div>'
+     +(mt.aporteAuto>0?'<div class="mut small" style="margin-top:4px">⚡ Aporte automático: <b>'+fmt(mt.aporteAuto)+'/mes</b> '+autoBadge+'</div>':'')
      +guia
+     +(hist?'<div class="hist-mini">'+hist+'</div>':'')
      +'</div>';
  }).join('');
 }
 function metaModal(id){
- const m=id?db.metas.find(x=>x.id===id):{};
- showModal({title:id?'Editar meta':'Nueva meta de ahorro',values:m,fields:[
+ const mt=id?db.metas.find(x=>x.id===id):{};
+ showModal({title:id?'Editar meta':'Nueva meta de ahorro',values:mt,fields:[
   {n:'nombre',l:'Nombre de la meta',req:1,ph:'Ej: Fondo de emergencia, Vacaciones'},
   {n:'objetivo',l:'Monto objetivo ($)',type:'number',req:1},
   {n:'ahorrado',l:'Ahorrado hasta ahora ($)',type:'number'},
+  {n:'aporteAuto',l:'Aporte automático mensual ($) — 0 = manual',type:'number'},
   {n:'plazo',l:'Fecha objetivo',type:'date'},
   {n:'responsable',l:'Responsable',type:'select',opts:[...PERSONAS,'Ambos']}
- ],submit:data=>{ if(id)Object.assign(m,data); else db.metas.push({id:uid(),ahorrado:+data.ahorrado||0,...data}); save(); }});
+ ],submit:data=>{ if(id)Object.assign(mt,data); else db.metas.push({id:uid(),ahorrado:+data.ahorrado||0,aporteAuto:+data.aporteAuto||0,ultimoAporte:'',historial:[],...data}); save(); }});
 }
 function abonoModal(id){
- const m=db.metas.find(x=>x.id===id);
- showModal({title:'Abonar a "'+m.nombre+'"',values:{},fields:[
+ const mt=db.metas.find(x=>x.id===id);
+ showModal({title:'Abonar a "'+mt.nombre+'"',values:{},fields:[
   {n:'monto',l:'Monto a abonar ($)',type:'number',req:1}
- ],submit:data=>{ m.ahorrado=(+m.ahorrado||0)+(+data.monto||0); save(); }});
+ ],submit:data=>{
+  mt.ahorrado=(+mt.ahorrado||0)+(+data.monto||0);
+  mt.historial=mt.historial||[];
+  mt.historial.push({mes:mesActual(),monto:+data.monto,tipo:'manual'});
+  save();
+ }});
 }
-function delMeta(id){ const m=db.metas.find(x=>x.id===id); if(confirm('¿Eliminar la meta "'+m.nombre+'"?')){ db.metas=db.metas.filter(x=>x.id!==id); save(); fillMetas(); } }
+function delMeta(id){ const mt=db.metas.find(x=>x.id===id); if(confirm('¿Eliminar la meta "'+mt.nombre+'"?')){ db.metas=db.metas.filter(x=>x.id!==id); save(); fillMetas(); } }
 
 /* --- Proyecciones --- */
 function vProy(){
@@ -712,8 +819,7 @@ function vProy(){
  +'<div class="fgrid"><label>Deuda total ($)<input type="number" id="pd0" value="'+Math.round(s.deudaTotal)+'" oninput="calcDeuda()"></label>'
  +'<label>Pago mensual ($)<input type="number" id="pdm" value="'+Math.round(s.cuotas||200000)+'" oninput="calcDeuda()"></label>'
  +'<label>Tasa anual promedio (%)<input type="number" id="pdr" value="35" step="0.1" oninput="calcDeuda()"></label></div>'
- +'<div id="rDeuda"></div></div></div>'
- +'<div class="card"><h3>💡 Supuestos</h3><p class="mut small">Cálculos educativos con interés compuesto mensual. Úsenlos para comparar escenarios y definir metas realistas de ahorro y pago.</p></div>';
+ +'<div id="rDeuda"></div></div></div>';
 }
 function calcAhorro(){
  const P=+($('#pa0').value)||0, A=+($('#pam').value)||0, R=(+($('#par').value)||0)/100;
@@ -732,12 +838,12 @@ function calcDeuda(){
  if(M<=0){ box.innerHTML=''; return; }
  let n;
  if(R===0){ n=Math.ceil(D0/M); }
- else{ if(M<=D0*R){ box.innerHTML='<div class="al bad">El pago mensual no alcanza a cubrir los intereses: la deuda crecería para siempre. Aumenten el pago o renegocien la tasa.</div>'; return; } n=Math.ceil(-Math.log(1-D0*R/M)/Math.log(1+R)); }
+ else{ if(M<=D0*R){ box.innerHTML='<div class="al bad">El pago mensual no alcanza a cubrir los intereses: la deuda crecería para siempre.</div>'; return; } n=Math.ceil(-Math.log(1-D0*R/M)/Math.log(1+R)); }
  const total=M*n, interes=total-D0;
  const fecha=new Date(hoy); fecha.setMonth(fecha.getMonth()+n);
  const txt=n>=12?Math.floor(n/12)+' año(s) y '+(n%12)+' mes(es)':n+' meses';
  box.innerHTML='<div class="res3"><div><div class="mut small">Libres de deuda en</div><b>'+txt+'</b></div><div><div class="mut small">Fecha estimada</div><b>'+mesTxt(fecha)+'</b></div><div><div class="mut small">Intereses totales</div><b>'+fmt(interes)+'</b></div></div>'
- +'<div class="al ok">Pagando '+fmt(M)+'/mes terminarían alrededor de '+mesTxt(fecha)+', pagando '+fmt(total)+' en total.</div>';
+ +'<div class="al ok">Pagando '+fmt(M)+'/mes terminarían alrededor de '+mesTxt(fecha)+'.</div>';
 }
 function short(v){ if(v>=1e9)return (v/1e9).toFixed(1)+'B'; if(v>=1e6)return '$'+(v/1e6).toFixed(v>=1e7?0:1)+'M'; if(v>=1e3)return '$'+Math.round(v/1e3)+'K'; return '$'+Math.round(v); }
 function donut(cv,items,center){
@@ -790,43 +896,35 @@ function barsChart(cv,labels,series){
 function genConsejos(s){
  const C=[];
  const gC=gastosPorCat(mesActual());
- if(s.ingresos<=0){ C.push({nivel:'warn',icon:'💵',titulo:'Registren sus ingresos mensuales',texto:'Vayan a la página Ingresos y anoten el sueldo líquido de cada uno. Con eso se activan la carga financiera, la capacidad de ahorro y todos los consejos personalizados.'}); }
+ if(s.ingresos<=0){ C.push({nivel:'warn',icon:'💵',titulo:'Registren sus ingresos mensuales',texto:'Vayan a Ingresos y anoten el sueldo líquido de cada uno.'}); }
  else{
   const pct=Math.round(s.carga*100);
-  if(s.carga>0.5)C.push({nivel:'bad',icon:'⚖️',titulo:'Carga financiera crítica ('+pct+'%)',texto:'Más de la mitad de los ingresos está comprometida en deudas y cuentas. Lo recomendado es no superar el 35%. Prioridad uno: congelar el uso de tarjetas y atacar las deudas en mora (ver método Bola de Nieve más abajo).'});
-  else if(s.carga>0.35)C.push({nivel:'warn',icon:'⚖️',titulo:'Carga financiera alta ('+pct+'%)',texto:'Están destinando '+pct+'% de los ingresos a obligaciones. Idealmente debe ser menos del 35%. Renegocien cuotas y eviten nuevos créditos.'});
-  else C.push({nivel:'ok',icon:'⚖️',titulo:'Carga financiera saludable ('+pct+'%)',texto:'La proporción de obligaciones respecto a ingresos está en rango sano. Mantengan el equilibrio y aprovechen de ahorrar.'});
-  const real=s.capacidad-s.gastos;
-  if(s.gastos>0&&real<0)C.push({nivel:'bad',icon:'💸',titulo:'Gastos variables superan lo disponible',texto:'Este mes llevan '+fmt(s.gastos)+' en gastos variables. Después de obligaciones quedan '+fmt(s.capacidad)+', así que están '+fmt(-real)+' sobre lo disponible. Revisen la página Gastos para identificar dónde recortar.'});
-  else if(s.gastos>0)C.push({nivel:'info',icon:'💸',titulo:'Gastos variables del mes: '+fmt(s.gastos),texto:'Tras pagar obligaciones ('+fmt(s.obligaciones)+') y gastar '+fmt(s.gastos)+', les quedan '+fmt(real)+' este mes. Registren sus gastos cada semana para mantener el control.'});
-  if(s.deudaTotal>s.ingresos*10)C.push({nivel:'warn',icon:'🔁',titulo:'Evalúen consolidar deudas',texto:'La deuda total equivale a '+(s.deudaTotal/s.ingresos).toFixed(0)+' meses de ingreso familiar. Un crédito consolidado (BancoEstado o Scotiabank suelen tener tasas más bajas que el retail) podría reducir cuota e intereses, y permitir cerrar varias tarjetas de casas comerciales.'});
+  if(s.carga>0.5)C.push({nivel:'bad',icon:'⚖️',titulo:'Carga financiera crítica ('+pct+'%)',texto:'Más de la mitad de los ingresos está comprometida. Prioridad: congelar tarjetas y atacar las deudas en mora.'});
+  else if(s.carga>0.35)C.push({nivel:'warn',icon:'⚖️',titulo:'Carga financiera alta ('+pct+'%)',texto:'Destinan '+pct+'% a obligaciones. Lo ideal es menos del 35%.'});
+  else C.push({nivel:'ok',icon:'⚖️',titulo:'Carga financiera saludable ('+pct+'%)',texto:'Buena proporción de obligaciones respecto a ingresos.'});
+  const real=s.capacidad-s.gastos-s.autoAporte;
+  if(s.gastos>0&&real<0)C.push({nivel:'bad',icon:'💸',titulo:'Gastos superan lo disponible',texto:'Este mes llevan '+fmt(s.gastos)+' en gastos. Están '+fmt(-real)+' sobre lo disponible tras obligaciones y ahorro.'});
+  if(s.deudaTotal>s.ingresos*10)C.push({nivel:'warn',icon:'🔁',titulo:'Evalúen consolidar deudas',texto:'La deuda equivale a '+(s.deudaTotal/s.ingresos).toFixed(0)+' meses de ingreso. Un crédito consolidado podría reducir cuota e intereses.'});
  }
- if(s.mora.length)C.push({nivel:'bad',icon:'🚨',titulo:s.mora.length+' deudas en mora ('+fmt(s.moraTotal)+')',texto:s.mora.map(d=>d.nombre).join(', ')+'. La mora genera intereses penales y daña el informe comercial (DICOM). Contacten a cada entidad para repactar en cuotas fijas; eviten pagar solo el mínimo, porque principalmente cubre intereses.'});
+ if(s.mora.length)C.push({nivel:'bad',icon:'🚨',titulo:s.mora.length+' deudas en mora ('+fmt(s.moraTotal)+')',texto:s.mora.map(d=>d.nombre).join(', ')+'. Contacten a cada entidad para repactar en cuotas fijas.'});
  const ex=db.deudas.filter(d=>d.estado!=='Pagada'&&d.limite>0&&d.saldo>d.limite);
- if(ex.length)C.push({nivel:'warn',icon:'💳',titulo:'Tarjetas sobre su cupo',texto:ex.map(d=>d.nombre).join(', ')+' están por sobre su límite. Paguen el exceso y procuren mantener el uso bajo el 30% del cupo para cuidar el score crediticio.'});
+ if(ex.length)C.push({nivel:'warn',icon:'💳',titulo:'Tarjetas sobre su cupo',texto:ex.map(d=>d.nombre).join(', ')+' están sobre su límite. Mantengan el uso bajo el 30% del cupo.'});
  const objetivo=s.obligaciones*3;
- if(objetivo>0)C.push({nivel:'info',icon:'🛡️',titulo:'Fondo de emergencia recomendado',texto:'Apunten a '+fmt(objetivo)+' (3 meses de obligaciones: '+fmt(s.obligaciones)+'/mes). Pueden usar las cuentas de ahorro de BancoEstado o las Renta Diaria de Scotiabank, que son líquidas y rentan algo. Metas escalonadas: primero $100.000, luego 1 mes, luego 3.'});
+ if(objetivo>0)C.push({nivel:'info',icon:'🛡️',titulo:'Fondo de emergencia recomendado',texto:'Apunten a '+fmt(objetivo)+' (3 meses de obligaciones). Usen cuentas líquidas como BancoEstado o Renta Diaria de Scotiabank.'});
  const overB=Object.entries(db.presupuesto||{}).filter(([c,l])=>l>0&&(gC[c]||0)>l);
- if(overB.length)C.push({nivel:'warn',icon:'🎛️',titulo:'Presupuestos excedidos: '+overB.length+' categoría(s)',texto:overB.map(([c,l])=>c+' ('+fmt(gC[c])+' de '+fmt(l)+')').join(', ')+'. Revisen esos gastos o ajusten el límite si fue demasiado optimista.'});
- else if(Object.keys(db.presupuesto||{}).length)C.push({nivel:'ok',icon:'🎛️',titulo:'Presupuestos bajo control',texto:'Ninguna categoría con presupuesto ha superado su límite este mes. ¡Sigan así!'});
- else C.push({nivel:'info',icon:'🎛️',titulo:'Definan presupuestos por categoría',texto:'En la página Gastos → botón "🎛️ Presupuestos" pueden establecer un límite mensual por categoría. La app les avisará cuando se pasen.'});
- const ingAct=ingresoFamiliar();
- const ult3=mesesHist().slice(-3);
- let neg=0; ult3.forEach(m=>{ const i=(db.histoIngresos[m]!=null?db.histoIngresos[m]:ingAct); if(i-gastoDeMes(m)<0)neg++; });
- if(neg>=2&&ingAct>0)C.push({nivel:'warn',icon:'📉',titulo:'Balance negativo recurrente',texto:'En '+neg+' de los últimos '+ult3.length+' meses los gastos superaron los ingresos. Revisen el Histórico para ver la tendencia y busquen recortar categorías no esenciales.'});
- if(db.metas.length){ const ah=db.metas.reduce((a,m)=>a+(+m.ahorrado||0),0); const obj=db.metas.reduce((a,m)=>a+(+m.objetivo||0),0);
-  C.push({nivel:'info',icon:'🎯',titulo:'Metas de ahorro: '+Math.round(ah/(obj||1)*100)+'% de avance',texto:'Llevan '+fmt(ah)+' ahorrados de '+fmt(obj)+' en '+db.metas.length+' meta(s). Mantengan abonos constantes; automaticen una transferencia el día de sueldo.'}); }
- if(db.cuentas.length>25)C.push({nivel:'info',icon:'🏦',titulo:db.cuentas.length+' cuentas y billeteras registradas',texto:'Tener tantas cuentas activas dificulta el control y puede generar costos de mantención o fraudes dormidos. Revisen cuáles no usan hace 6+ meses y considérenlas cerrar. Las prepago sin uso (Tenpo, Prex, Global66, etc.) suelen ser fáciles de cerrar.'});
- const pac=db.deudas.find(d=>/pac/i.test(d.notas||''));
- if(pac)C.push({nivel:'info',icon:'📆',titulo:'Crédito con PAC (pago automático)',texto:'El crédito de BancoEstado de Elías se paga automáticamente desde la Cuenta RUT. Asegúrense de tener la cuota ('+fmt(pac.cuota)+') disponible antes del día 10 de cada mes para evitar mora e intereses.'});
- if(db.cuentas.some(c=>c.moneda==='USD'))C.push({nivel:'info',icon:'💱',titulo:'Diversificación en dólares',texto:'Bien: ya tienen cuentas en USD en Scotiabank. Mantener un 10–20% del ahorro en dólares protege contra la devaluación del peso.'});
+ if(overB.length)C.push({nivel:'warn',icon:'🎛️',titulo:'Presupuestos excedidos: '+overB.length+' categoría(s)',texto:overB.map(([c,l])=>c+' ('+fmt(gC[c])+' de '+fmt(l)+')').join(', ')+'.'});
+ if(s.autoAporte>0)C.push({nivel:'ok',icon:'⚡',titulo:'Ahorro automático activo: '+fmt(s.autoAporte)+'/mes',texto:'Tienen aportes automáticos programados a sus metas. Se aplican una vez al mes y ya están descontados del "Libre del mes". ¡Automatizar es la mejor forma de ahorrar!'});
+ else C.push({nivel:'info',icon:'⚡',titulo:'Activen el ahorro automático',texto:'En Metas, asignen un "aporte automático mensual" a cada meta. Se descontará de su presupuesto y se aplicará solo cada mes.'});
+ if(db.metas.length){ const ah=db.metas.reduce((a,mt)=>a+(+mt.ahorrado||0),0); const obj=db.metas.reduce((a,mt)=>a+(+mt.objetivo||0),0);
+  C.push({nivel:'info',icon:'🎯',titulo:'Metas de ahorro: '+Math.round(ah/(obj||1)*100)+'% de avance',texto:'Llevan '+fmt(ah)+' de '+fmt(obj)+' en '+db.metas.length+' meta(s).'}); }
+ if(db.cuentas.length>25)C.push({nivel:'info',icon:'🏦',titulo:db.cuentas.length+' cuentas registradas',texto:'Revisen cuáles no usan hace 6+ meses y considérenlas cerrar para simplificar el control.'});
  return C;
 }
 function vConsejos(){
  const s=stats(); const C=genConsejos(s);
  const plan=db.deudas.filter(d=>d.estado!=='Pagada').sort((a,b)=>a.saldo-b.saldo);
  return C.map(c=>'<div class="card consejo '+c.nivel+'"><div class="cicon">'+c.icon+'</div><div><h3>'+c.titulo+'</h3><p class="mut">'+c.texto+'</p></div></div>').join('')
- +(plan.length?'<div class="card"><h3>🧊 Método "Bola de Nieve" sugerido</h3><p class="mut small">Orden recomendado para atacar deudas: paguen el mínimo (o la cuota) en todas y destinen todo el excedente a la más pequeña. Al cancelarla, sumen esa cuota al ataque de la siguiente.</p><div class="tscroll"><table class="tbl"><thead><tr><th>#</th><th>Deuda</th><th>Responsable</th><th>Saldo</th><th>Cuota</th></tr></thead><tbody>'
+ +(plan.length?'<div class="card"><h3>🧊 Método "Bola de Nieve" sugerido</h3><div class="tscroll"><table class="tbl"><thead><tr><th>#</th><th>Deuda</th><th>Responsable</th><th>Saldo</th><th>Cuota</th></tr></thead><tbody>'
  +plan.map((d,i)=>'<tr><td><b>'+(i+1)+'</b></td><td>'+esc(d.nombre)+'</td><td>'+esc(d.responsable)+'</td><td>'+fmt(d.saldo)+'</td><td>'+fmt(d.cuota)+'</td></tr>').join('')
  +'</tbody></table></div></div>':'');
 }
@@ -834,29 +932,34 @@ function vConsejos(){
 /* --- Ajustes --- */
 function vAjustes(){
  const hasPass=!!db.config.passHash;
- return '<div class="card"><h3>🔑 Contraseña de acceso</h3>'
- +'<p class="mut">'+(hasPass?'La app está protegida con contraseña: se pedirá cada vez que se abra.':'Actualmente la app no tiene contraseña.')+'</p>'
+ return '<div class="card"><h3>☁️ Sincronización entre dispositivos</h3>'
+ +'<p class="mut">Conecta la app a una base de datos gratuita en la nube (Firebase) para que el PC y el celular vean la misma información automáticamente, sin exportar/importar.</p>'
+ +'<div id="sync-status"></div>'
+ +'<div class="toolbar">'
+ +'<button class="btn" onclick="syncConfigModal()">🔧 Configurar base de datos</button>'
+ +'<button class="btn" onclick="linkDeviceModal()">🔗 Vincular este dispositivo</button>'
+ +'<button class="btn primary" id="btnSyncToggle" onclick="toggleSync()">▶️ Activar</button>'
+ +'<button class="btn" onclick="copySyncCode()">📋 Copiar código</button>'
+ +'<button class="btn" onclick="manualSync()">🔄 Sincronizar ahora</button>'
+ +'</div>'
+ +'<p class="mut small" id="sync-detail"></p>'
+ +'</div>'
+ +'<div class="card"><h3>🔑 Contraseña de acceso</h3>'
+ +'<p class="mut">'+(hasPass?'La app está protegida con contraseña.':'Actualmente la app no tiene contraseña.')+'</p>'
  +'<div class="toolbar">'
  +'<button class="btn primary" onclick="passModal()">'+(hasPass?'Cambiar contraseña':'Crear contraseña')+'</button>'
  +(hasPass?'<button class="btn badb" onclick="quitarPass()">Quitar contraseña</button>':'')
- +'</div>'
- +'<p class="mut small">⚠️ Esta contraseña protege el acceso visual a la app en este dispositivo. Si la olvidas, deberás borrar los datos del navegador para volver a entrar.</p>'
- +'</div>'
- +'<div class="card"><h3>💾 Respaldos</h3><p class="mut">Los datos se guardan <b>localmente en este navegador</b>. Para respaldar o migrar entre dispositivos:</p>'
+ +'</div></div>'
+ +'<div class="card"><h3>💾 Respaldos</h3>'
  +'<div class="toolbar">'
  +'<button class="btn primary" onclick="exportar()">⬇️ Exportar JSON</button>'
  +'<button class="btn primary" onclick="expCifradoModal()">🔐 Exportar cifrado (.finz)</button>'
  +'<button class="btn" onclick="document.getElementById(\'impFile\').click()">⬆️ Importar (JSON o .finz)</button>'
  +'<input type="file" id="impFile" accept=".json,.finz" hidden onchange="importar(this)">'
  +'</div>'
- +'<p class="mut small">El respaldo <b>cifrado</b> protege el archivo con una contraseña: quien lo importe deberá escribirla. Guárdenla bien, porque sin ella no se puede recuperar el contenido.</p>'
  +'<div class="toolbar" style="margin-top:12px">'
  +'<button class="btn warnb" onclick="resetSeed()">♻️ Restaurar datos base</button>'
- +'<button class="btn badb" onclick="wipe()">🗑️ Borrar todo</button></div></div>'
- +'<div class="card"><h3>📌 Notas</h3><ul class="mut small">'
- +'<li>Si suben la app a internet, los datos seguirán en el navegador de cada dispositivo; usen Exportar/Importar para sincronizar entre equipos.</li>'
- +'<li>Para datos sensibles de tarjetas (CVV, números completos) prefieran su bóveda cifrada (boveda_segura.html).</li>'
- +'<li>Recomendación: actualicen saldos, deudas, gastos y servicios una vez al mes (ideal el día 1) y exporten un respaldo cifrado.</li></ul></div>';
+ +'<button class="btn badb" onclick="wipe()">🗑️ Borrar todo</button></div></div>';
 }
 function passModal(){
  showModal({title:db.config.passHash?'Cambiar contraseña':'Crear contraseña',values:{},fields:[
@@ -866,17 +969,11 @@ function passModal(){
   if(data.p1.length<4){ alert('La contraseña debe tener al menos 4 caracteres.'); return false; }
   if(data.p1!==data.p2){ alert('Las contraseñas no coinciden.'); return false; }
   const salt=genSalt();
-  db.config.passSalt=salt;
-  db.config.passHash=hashPass(data.p1,salt);
-  save();
-  alert('✅ Contraseña guardada. Se pedirá cada vez que abras la app.');
+  db.config.passSalt=salt; db.config.passHash=hashPass(data.p1,salt);
+  save(); alert('✅ Contraseña guardada.');
  }});
 }
-function quitarPass(){
- if(confirm('¿Quitar la contraseña? La app se abrirá sin pedir clave.')){
-  db.config.passHash=null; db.config.passSalt=null; save(); render();
- }
-}
+function quitarPass(){ if(confirm('¿Quitar la contraseña?')){ db.config.passHash=null; db.config.passSalt=null; save(); render(); } }
 function exportar(){ const blob=new Blob([JSON.stringify(db,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='finanzas_re_'+new Date().toISOString().slice(0,10)+'.json'; a.click(); }
 function expCifradoModal(){
  showModal({title:'Exportar respaldo cifrado',values:{},fields:[
@@ -893,8 +990,8 @@ function expCifradoModal(){
 function aplicarImport(d){
  db=d;
  db.gastos=db.gastos||[]; db.metas=db.metas||[]; db.config=db.config||{passHash:null,passSalt:null};
- db.presupuesto=db.presupuesto||{}; db.histoIngresos=db.histoIngresos||{};
- save(); render();
+ db.presupuesto=db.presupuesto||{}; db.histoIngresos=db.histoIngresos||{}; db.sync=db.sync||{enabled:false,url:'',room:''};
+ persist(); render();
 }
 function importar(inp){
  const f=inp.files[0]; if(!f)return;
@@ -902,12 +999,11 @@ function importar(inp){
  r.onload=e=>{
   let obj; try{ obj=JSON.parse(e.target.result); }catch(err){ alert('Archivo inválido ❌'); inp.value=''; return; }
   if(obj&&obj.v===1&&obj.data&&obj.tag){
-   pendingBackup=obj;
    showModal({title:'🔐 Respaldo cifrado detectado',values:{},fields:[{n:'pass',l:'Contraseña del respaldo',type:'password',req:1}],submit:data=>{
-    const plain=decryptBackup(pendingBackup,data.pass);
+    const plain=decryptBackup(obj,data.pass);
     if(plain==null){ alert('Contraseña incorrecta o archivo corrupto ❌'); return false; }
-    try{ const d=JSON.parse(plain); if(!d.deudas||!d.cuentas)throw 0; aplicarImport(d); alert('Respaldo cifrado importado correctamente ✅'); }
-    catch(err){ alert('El contenido del respaldo es inválido ❌'); }
+    try{ const d=JSON.parse(plain); if(!d.deudas||!d.cuentas)throw 0; aplicarImport(d); alert('Respaldo cifrado importado ✅'); }
+    catch(err){ alert('Contenido inválido ❌'); }
    }});
   } else if(obj&&obj.deudas&&obj.cuentas){
    aplicarImport(obj); alert('Datos importados correctamente ✅');
@@ -915,8 +1011,8 @@ function importar(inp){
  };
  r.readAsText(f); inp.value='';
 }
-function resetSeed(){ if(confirm('¿Restaurar los datos base (los del Excel original)? Se perderán los cambios actuales.')){ db=seed(); save(); render(); } }
-function wipe(){ if(confirm('¿Borrar TODOS los datos?')){ db={ingresos:[],deudas:[],servicios:[],cuentas:[],gastos:[],metas:[],presupuesto:{},histoIngresos:{},config:{passHash:null,passSalt:null}}; save(); render(); } }
+function resetSeed(){ if(confirm('¿Restaurar los datos base? Se perderán los cambios.')){ db=seed(); persist(); render(); } }
+function wipe(){ if(confirm('¿Borrar TODOS los datos?')){ db=seed(); db.ingresos=[];db.deudas=[];db.servicios=[];db.cuentas=[];db.gastos=[];db.metas=[]; persist(); render(); } }
 
 /* ============ MODAL ============ */
 function showModal(o){
@@ -957,6 +1053,7 @@ function nav(v){
  if(v==='cuentas')fillCuentas();
  if(v==='metas')fillMetas();
  if(v==='proyecciones'){ calcAhorro(); calcDeuda(); }
+ if(v==='ajustes')updateSyncUI();
  window.scrollTo(0,0);
 }
 function render(){ nav(view); }
@@ -982,8 +1079,10 @@ function tryUnlock(){
 
 /* ============ INICIO ============ */
 $('#hoy').textContent=hoy.toLocaleDateString('es-CL',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+applyAutoAportes();
 nav('dashboard');
 initLock();
+if(syncReady())startSync();
 </script>
 </body>
 </html>
