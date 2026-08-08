@@ -102,7 +102,6 @@ ul{padding-left:20px;line-height:1.8}
 </head>
 <body>
 
-<!-- PANTALLA DE BLOQUEO -->
 <div id="lockScreen" style="display:none">
   <div class="lockbox">
     <div class="lg">🔐</div>
@@ -122,6 +121,7 @@ ul{padding-left:20px;line-height:1.8}
    <a class="ni" data-v="deudas" onclick="nav('deudas')">💳 Deudas</a>
    <a class="ni" data-v="servicios" onclick="nav('servicios')">🔌 Servicios y pagos</a>
    <a class="ni" data-v="gastos" onclick="nav('gastos')">💸 Gastos</a>
+   <a class="ni" data-v="historico" onclick="nav('historico')">📉 Histórico</a>
    <a class="ni" data-v="cuentas" onclick="nav('cuentas')">🏦 Cuentas</a>
    <a class="ni" data-v="ingresos" onclick="nav('ingresos')">💵 Ingresos</a>
    <a class="ni" data-v="metas" onclick="nav('metas')">🎯 Metas</a>
@@ -140,7 +140,7 @@ ul{padding-left:20px;line-height:1.8}
 
 <script>
 'use strict';
-/* ============ SEGURIDAD (SHA-256 puro en JS) ============ */
+/* ============ CRIPTOGRAFÍA (SHA-256 puro JS + respaldo cifrado) ============ */
 var sha256=function(ascii){
  function rightRotate(v,a){return (v>>>a)|(v<<(32-a));}
  var mathPow=Math.pow,maxWord=mathPow(2,32),len='length',i,j,result='';
@@ -173,8 +173,41 @@ var sha256=function(ascii){
  for(i=0;i<8;i++){for(j=3;j+1;j--){var b=(hash[i]>>(j*8))&255;result+=((b<16)?0:'')+b.toString(16);}}
  return result;
 };
+function sha256s(s){ return sha256(unescape(encodeURIComponent(s))); }
 function genSalt(){var s='',c='abcdef0123456789';for(var i=0;i<16;i++)s+=c[Math.floor(Math.random()*c.length)];return s;}
-function hashPass(pass,salt){var s=unescape(encodeURIComponent(pass))+salt;for(var i=0;i<1000;i++)s=sha256(s);return s;}
+function kdf(pass,salt){ var kk=unescape(encodeURIComponent(pass))+salt; for(var i=0;i<2000;i++)kk=sha256(kk); return kk; }
+function hashPass(pass,salt){ return kdf(pass,salt); }
+function strToBytes(str){ var s=unescape(encodeURIComponent(str)),o=[]; for(var i=0;i<s.length;i++)o.push(s.charCodeAt(i)); return o; }
+function bytesToStr(bytes){ var s=''; bytes.forEach(function(b){s+=String.fromCharCode(b);}); return decodeURIComponent(escape(s)); }
+function bytesToB64(bytes){ var s=''; bytes.forEach(function(b){s+=String.fromCharCode(b);}); return btoa(s); }
+function b64ToBytes(b64){ var s=atob(b64),o=[]; for(var i=0;i<s.length;i++)o.push(s.charCodeAt(i)); return o; }
+function keystream(key,nonce,len){
+ var out=[],c=0;
+ while(out.length<len){
+  var h=sha256(key+':'+nonce+':'+c);
+  for(var i=0;i<h.length;i+=2)out.push(parseInt(h.substr(i,2),16));
+  c++;
+ }
+ return out.slice(0,len);
+}
+function encryptBackup(jsonStr,pass){
+ var salt=genSalt(),key=kdf(pass,salt),nonce=genSalt();
+ var bytes=strToBytes(jsonStr);
+ var ks=keystream(key,nonce,bytes.length);
+ var enc=bytes.map(function(b,i){return b^ks[i];});
+ var tag=sha256(key+':'+sha256s(jsonStr));
+ return {v:1,salt:salt,nonce:nonce,tag:tag,data:bytesToB64(enc)};
+}
+function decryptBackup(obj,pass){
+ var key=kdf(pass,obj.salt);
+ var bytes=b64ToBytes(obj.data);
+ var ks=keystream(key,obj.nonce,bytes.length);
+ var dec=bytes.map(function(b,i){return b^ks[i];});
+ var str=bytesToStr(dec);
+ var tag=sha256(key+':'+sha256s(str));
+ if(tag!==obj.tag)return null;
+ return str;
+}
 
 /* ============ ESTADO ============ */
 const KEY='finanzas_re_v1';
@@ -188,6 +221,9 @@ const diasHasta=iso=>{ if(!iso)return null; const d=new Date(iso+'T00:00:00'); r
 const fdate=iso=>{ if(!iso)return '—'; const p=iso.split('-'); return p[2]+'-'+p[1]+'-'+p[0]; };
 const mesTxt=d=>d.toLocaleDateString('es-CL',{year:'numeric',month:'long'});
 const mesActual=()=>{const n=new Date();return n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0');};
+const MESES_N=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+const mesLabel=m=>{const p=m.split('-');return MESES_N[parseInt(p[1])-1]+' '+p[0];};
+const mesLabelCorto=m=>{const p=m.split('-');return MESES_N[parseInt(p[1])-1]+' '+p[0].slice(2);};
 
 function seed(){
  const u=()=>'s'+Math.random().toString(36).slice(2,10);
@@ -281,17 +317,24 @@ function seed(){
   ],
   gastos:[],
   metas:[],
+  presupuesto:{},
+  histoIngresos:{},
   config:{passHash:null,passSalt:null}
  };
 }
 function load(){ try{const r=localStorage.getItem(KEY); if(r){const d=JSON.parse(r); if(d&&d.deudas&&d.cuentas){
   d.gastos=d.gastos||[]; d.metas=d.metas||[]; d.config=d.config||{passHash:null,passSalt:null};
+  d.presupuesto=d.presupuesto||{}; d.histoIngresos=d.histoIngresos||{};
   return d; }}}catch(e){} return seed(); }
 function save(){ try{localStorage.setItem(KEY,JSON.stringify(db));}catch(e){} }
 let db=load(); save();
+let pendingBackup=null;
 
 /* ============ CÁLCULOS ============ */
-function gastosDelMes(){ const m=mesActual(); return db.gastos.filter(g=>g.fecha&&g.fecha.startsWith(m)).reduce((a,g)=>a+(+g.monto||0),0); }
+function gastoDeMes(m){ return db.gastos.filter(g=>g.fecha&&g.fecha.startsWith(m)).reduce((a,g)=>a+(+g.monto||0),0); }
+function gastosDelMes(){ return gastoDeMes(mesActual()); }
+function ingresoFamiliar(){ return db.ingresos.reduce((a,i)=>a+(+i.monto||0),0); }
+function gastosPorCat(m){ const o={}; db.gastos.filter(g=>g.fecha&&g.fecha.startsWith(m)).forEach(g=>{o[g.categoria]=(o[g.categoria]||0)+(+g.monto||0);}); return o; }
 function stats(){
  const act=db.deudas.filter(d=>d.estado!=='Pagada');
  const deudaTotal=act.reduce((a,d)=>a+(+d.saldo||0),0);
@@ -299,7 +342,7 @@ function stats(){
  const mora=act.filter(d=>d.estado==='En mora');
  const moraTotal=mora.reduce((a,d)=>a+(+d.saldo||0),0);
  const servicios=db.servicios.reduce((a,s)=>a+(+s.monto||0),0);
- const ingresos=db.ingresos.reduce((a,i)=>a+(+i.monto||0),0);
+ const ingresos=ingresoFamiliar();
  const obligaciones=cuotas+servicios;
  const gastos=gastosDelMes();
  const capacidad=ingresos-obligaciones;
@@ -316,6 +359,8 @@ function alertas(s){
  db.servicios.filter(x=>x.estado!=='Pagada'&&x.vence).forEach(x=>{ const d=diasHasta(x.vence); if(d<0)A.push({t:'bad',x:'<b>'+esc(x.nombre)+'</b> venció hace '+(-d)+' días ('+fmt(x.monto)+').'}); else if(d<=7)A.push({t:'warn',x:'<b>'+esc(x.nombre)+'</b> vence en '+d+' día(s) ('+fmt(x.monto)+').'}); });
  if(s.carga!=null&&s.carga>0.5)A.push({t:'bad',x:'<b>Carga financiera crítica:</b> el '+Math.round(s.carga*100)+'% de los ingresos se va en obligaciones (recomendado: bajo 35%).'});
  else if(s.carga!=null&&s.carga>0.35)A.push({t:'warn',x:'<b>Carga financiera alta:</b> '+Math.round(s.carga*100)+'% de los ingresos en obligaciones.'});
+ const gC=gastosPorCat(mesActual());
+ Object.entries(db.presupuesto||{}).forEach(([c,l])=>{ if(l>0&&(gC[c]||0)>l)A.push({t:'warn',x:'<b>Presupuesto excedido</b> en '+esc(c)+': llevan '+fmt(gC[c])+' de '+fmt(l)+' este mes.'}); });
  return A;
 }
 
@@ -431,7 +476,7 @@ function servModal(id){
 function toggleServ(id){ const s=db.servicios.find(x=>x.id===id); s.estado=s.estado==='Pagada'?'Pendiente':'Pagada'; save(); fillServ(); }
 function delServ(id){ const s=db.servicios.find(x=>x.id===id); if(confirm('¿Eliminar "'+s.nombre+'"?')){ db.servicios=db.servicios.filter(x=>x.id!==id); save(); fillServ(); } }
 
-/* --- Gastos variables --- */
+/* --- Gastos variables + Presupuesto --- */
 const CATEGORIAS=['Supermercado','Transporte','Comida y Restaurant','Salud','Educación','Entretención','Ropa y Calzado','Hogar','Mascotas','Suscripciones','Otros'];
 const CAT_COLORS=['#34d399','#60a5fa','#f59e0b','#f87171','#a78bfa','#f472b6','#fbbf24','#38bdf8','#4ade80','#c084fc','#94a3b8'];
 const MEDIOS=['Efectivo','Débito','Crédito','Transferencia','Prepago/Billetera','Otro'];
@@ -441,8 +486,11 @@ function vGastos(){
  return '<div class="toolbar">'
  +'<input type="month" value="'+fG.mes+'" onchange="fG.mes=this.value;fillGastos()">'
  +'<select onchange="fG.cat=this.value;fillGastos()"><option value="">Todas las categorías</option>'+CATEGORIAS.map(c=>'<option '+(fG.cat===c?'selected':'')+'>'+c+'</option>').join('')+'</select>'
- +'<span class="spacer"></span><button class="btn primary" onclick="gastoModal()">＋ Nuevo gasto</button></div>'
+ +'<span class="spacer"></span>'
+ +'<button class="btn" onclick="presuModal()">🎛️ Presupuestos</button>'
+ +'<button class="btn primary" onclick="gastoModal()">＋ Nuevo gasto</button></div>'
  +'<div id="gastos-sum"></div>'
+ +'<div id="presu-box"></div>'
  +'<div class="grid2"><div class="card"><h3>Gastos por categoría</h3><div class="donutwrap"><canvas id="cGasto"></canvas><div id="gastoLeg" class="leg"></div></div></div>'
  +'<div class="card"><h3>Top categorías</h3><div id="gastoResumen"></div></div></div>'
  +'<div id="gastos-list"></div>';
@@ -458,6 +506,7 @@ function fillGastos(){
  $('#gastos-sum').innerHTML='<div class="chips"><span class="chip">Total del período: <b>'+fmt(total)+'</b></span>'
  +(s.ingresos>0?'<span class="chip">Libre tras obligaciones y estos gastos: <b>'+fmt(libre)+'</b></span>':'')
  +'</div>';
+ fillPresu();
  donut($('#cGasto'), entries.map(([c,v])=>({label:c,value:v,color:CAT_COLORS[CATEGORIAS.indexOf(c)]||'#94a3b8'})), fmt(total));
  $('#gastoLeg').innerHTML=entries.map(([c,v])=>'<div class="lrow"><span class="dot" style="background:'+(CAT_COLORS[CATEGORIAS.indexOf(c)]||'#94a3b8')+'"></span>'+c+' <b>'+fmt(v)+'</b> <span class="mut">'+(total?Math.round(v/total*100):0)+'%</span></div>').join('')||'<span class="mut">Sin gastos en este período.</span>';
  $('#gastoResumen').innerHTML=entries.slice(0,6).map(([c,v])=>'<div class="bar-row"><div>'+c+'</div><div class="bar-track"><div class="bar-fill" style="width:'+(entries[0][1]?Math.max(4,v/entries[0][1]*100):0)+'%;background:'+(CAT_COLORS[CATEGORIAS.indexOf(c)]||'#94a3b8')+'"></div></div><div class="bar-val">'+fmt(v)+'</div></div>').join('')||'<span class="mut">Sin datos.</span>';
@@ -465,6 +514,33 @@ function fillGastos(){
  $('#gastos-list').innerHTML='<div class="card nopad"><div class="tscroll"><table class="tbl"><thead><tr><th>Fecha</th><th>Descripción</th><th>Categoría</th><th>Monto</th><th>Responsable</th><th>Medio</th><th></th></tr></thead><tbody>'
  +sorted.map(g=>'<tr><td>'+fdate(g.fecha)+'</td><td><b>'+esc(g.desc)+'</b></td><td><span class="dot" style="background:'+(CAT_COLORS[CATEGORIAS.indexOf(g.categoria)]||'#94a3b8')+'"></span> '+esc(g.categoria)+'</td><td>'+fmt(g.monto)+'</td><td>'+esc(g.responsable)+'</td><td class="mut small">'+esc(g.medio||'')+'</td><td class="acts"><button class="ibtn" onclick="gastoModal(\''+g.id+'\')">✏️</button><button class="ibtn" onclick="delGasto(\''+g.id+'\')">🗑️</button></td></tr>').join('')
  +'</tbody></table></div></div>';
+}
+function fillPresu(){
+ const m=fG.mes||mesActual();
+ const gCat=gastosPorCat(m);
+ const entries=Object.entries(db.presupuesto||{}).filter(([c,l])=>l>0);
+ if(!entries.length){
+  $('#presu-box').innerHTML='<div class="card"><h3>🎛️ Presupuesto del mes</h3><p class="mut">Aún no han definido límites por categoría. <button class="btn primary" style="margin-left:8px" onclick="presuModal()">Definir presupuestos</button> Establecer límites les dará alertas cuando se pasen.</p></div>';
+  return;
+ }
+ const rows=entries.map(([c,l])=>{
+  const g=gCat[c]||0; const pct=Math.round(g/l*100); const w=Math.min(100,pct);
+  const col=pct>100?'#f0647a':pct>=80?'#f5b942':'#2dd4a7';
+  const icon=pct>100?'⚠️ ':'';
+  return '<div style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:4px"><span>'+icon+esc(c)+'</span><span class="mut">'+fmt(g)+' / '+fmt(l)+' · <b style="color:'+col+'">'+pct+'%</b></span></div>'
+  +'<div class="bar-track"><div class="bar-fill" style="width:'+w+'%;background:'+col+'"></div></div></div>';
+ }).join('');
+ $('#presu-box').innerHTML='<div class="card"><button class="btn" style="float:right;padding:5px 12px;font-size:.78rem" onclick="presuModal()">✏️ Editar</button><h3>🎛️ Presupuesto de '+mesLabel(m)+'</h3>'+rows+'</div>';
+}
+function presuModal(){
+ const vals={}; CATEGORIAS.forEach(c=>vals['c_'+c]=db.presupuesto[c]||'');
+ showModal({title:'Presupuestos mensuales por categoría',values:vals,
+  fields:CATEGORIAS.map(c=>({n:'c_'+c,l:c+' ($/mes)',type:'number',ph:'Sin límite'})),
+  submit:data=>{
+   db.presupuesto={};
+   CATEGORIAS.forEach(c=>{ const v=+data['c_'+c]||0; if(v>0)db.presupuesto[c]=v; });
+   save();
+ }});
 }
 function gastoModal(id){
  const g=id?db.gastos.find(x=>x.id===id):{};
@@ -479,6 +555,44 @@ function gastoModal(id){
  ],submit:data=>{ if(id)Object.assign(g,data); else db.gastos.push({id:uid(),...data}); save(); }});
 }
 function delGasto(id){ const g=db.gastos.find(x=>x.id===id); if(confirm('¿Eliminar gasto "'+g.desc+'"?')){ db.gastos=db.gastos.filter(x=>x.id!==id); save(); fillGastos(); } }
+
+/* --- Histórico mensual --- */
+function vHist(){
+ return '<div class="toolbar"><span class="chip" id="hist-chip"></span><span class="spacer"></span><span class="mut small">El ingreso de cada mes se edita con ✏️. Si no se registra, se asume el ingreso actual.</span></div>'
+ +'<div class="card"><h3>📉 Ingresos vs Gastos por mes</h3><canvas id="cHist"></canvas>'
+ +'<div class="leg" style="flex-direction:row;gap:20px;min-width:0;margin-top:10px"><div class="lrow"><span class="dot" style="background:#2dd4a7"></span>Ingresos</div><div class="lrow"><span class="dot" style="background:#f0647a"></span>Gastos</div></div></div>'
+ +'<div id="hist-list"></div>';
+}
+function mesesHist(){
+ const set=new Set();
+ db.gastos.forEach(g=>{ if(g.fecha) set.add(g.fecha.slice(0,7)); });
+ Object.keys(db.histoIngresos||{}).forEach(m=>set.add(m));
+ set.add(mesActual());
+ return [...set].sort().reverse().slice(0,12).reverse();
+}
+function fillHist(){
+ const meses=mesesHist();
+ const ingActual=ingresoFamiliar();
+ const data=meses.map(m=>({m,ingresos:(db.histoIngresos[m]!=null?db.histoIngresos[m]:ingActual),gastos:gastoDeMes(m)}));
+ const bal=data.reduce((a,d)=>a+d.ingresos-d.gastos,0);
+ $('#hist-chip').innerHTML='Balance del período: <b class="'+(bal>=0?'':'bad-t')+'">'+fmt(bal)+'</b>';
+ barsChart($('#cHist'),data.map(d=>mesLabelCorto(d.m)),
+  [{name:'Ingresos',color:'#2dd4a7',data:data.map(d=>d.ingresos)},
+   {name:'Gastos',color:'#f0647a',data:data.map(d=>d.gastos)}]);
+ $('#hist-list').innerHTML='<div class="card nopad"><div class="tscroll"><table class="tbl"><thead><tr><th>Mes</th><th>Ingresos</th><th>Gastos</th><th>Balance</th><th>% gastado</th><th></th></tr></thead><tbody>'
+ +[...data].reverse().map(d=>{
+   const b=d.ingresos-d.gastos;
+   const pct=d.ingresos>0?Math.round(d.gastos/d.ingresos*100):null;
+   const reg=db.histoIngresos[d.m]!=null;
+   return '<tr><td><b>'+mesLabel(d.m)+'</b></td><td>'+fmt(d.ingresos)+(reg?'':' <span class="mut small">(asumido)</span>')+'</td><td>'+fmt(d.gastos)+'</td><td class="'+(b>=0?'':'bad-t')+'">'+fmt(b)+'</td><td>'+(pct==null?'—':pct+'%')+'</td><td class="acts"><button class="ibtn" title="Editar ingresos del mes" onclick="histIngModal(\''+d.m+'\')">✏️</button></td></tr>';
+ }).join('')
+ +'</tbody></table></div></div>';
+}
+function histIngModal(m){
+ showModal({title:'Ingresos de '+mesLabel(m),values:{monto:db.histoIngresos[m]!=null?db.histoIngresos[m]:ingresoFamiliar()},fields:[
+  {n:'monto',l:'Ingresos totales del hogar en el mes ($)',type:'number',req:1}
+ ],submit:data=>{ db.histoIngresos[m]=+data.monto||0; save(); }});
+}
 
 /* --- Cuentas --- */
 let fC={resp:''}; let verNumeros=false;
@@ -515,7 +629,7 @@ function delCuenta(id){ const c=db.cuentas.find(x=>x.id===id); if(confirm('¿Eli
 
 /* --- Ingresos --- */
 function vIngresos(){
- const tot=db.ingresos.reduce((a,i)=>a+(+i.monto||0),0);
+ const tot=ingresoFamiliar();
  return '<div class="chips"><span class="chip">Ingreso familiar mensual: <b>'+fmt(tot)+'</b></span></div>'
  +'<div class="grid2">'+db.ingresos.map(i=>'<div class="card"><div class="person-head"><span class="avatar">'+esc((i.persona||'?')[0])+'</span><div><h3>'+esc(i.persona)+'</h3><div class="mut small">'+esc(i.fuente||'Sin fuente definida')+'</div></div><button class="ibtn" style="margin-left:auto" onclick="ingModal(\''+i.id+'\')">✏️</button><button class="ibtn" onclick="delIng(\''+i.id+'\')">🗑️</button></div><div class="big">'+fmt(i.monto)+'</div><div class="mut small">mensual líquido</div></div>').join('')+'</div>'
  +'<div class="toolbar"><button class="btn primary" onclick="ingModal()">＋ Agregar ingreso</button></div>'
@@ -651,10 +765,31 @@ function areaChart(cv,pts){
  const step=Math.max(1,Math.round(pts.length/6));
  for(let i=0;i<pts.length;i+=step){ ctx.fillText('año '+Math.round(i/12),X(i),H-14); }
 }
+function barsChart(cv,labels,series){
+ if(!cv)return; const s=2; cv.width=cv.offsetWidth*s; cv.height=260*s; cv.style.height='260px';
+ const ctx=cv.getContext('2d'); const W=cv.width,H=cv.height,padL=110,padR=20,padT=20,padB=60;
+ const max=Math.max(1,...series.flatMap(sr=>sr.data));
+ const Y=v=>padT+(H-padT-padB)*(1-v/max);
+ ctx.strokeStyle='#20294a'; ctx.fillStyle='#8d99b8'; ctx.font='18px system-ui'; ctx.textAlign='right';
+ for(let g=0;g<=4;g++){ const v=max*g/4,y=Y(v); ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke(); ctx.fillText(short(v),padL-10,y+6); }
+ const n=labels.length||1; const groupW=(W-padL-padR)/n; const barW=Math.min(46*s,(groupW*0.68)/series.length);
+ labels.forEach((lab,i)=>{
+  const cx0=padL+groupW*i+groupW/2;
+  series.forEach((sr,si)=>{
+   const x=cx0-(series.length*barW)/2+si*barW;
+   const val=sr.data[i]||0; const y=Y(val);
+   ctx.fillStyle=sr.color;
+   ctx.fillRect(x,y,barW-4*s,(H-padB)-y);
+  });
+  ctx.fillStyle='#8d99b8'; ctx.textAlign='center'; ctx.font='17px system-ui';
+  ctx.fillText(lab,cx0,H-18*s);
+ });
+}
 
 /* --- Consejos --- */
 function genConsejos(s){
  const C=[];
+ const gC=gastosPorCat(mesActual());
  if(s.ingresos<=0){ C.push({nivel:'warn',icon:'💵',titulo:'Registren sus ingresos mensuales',texto:'Vayan a la página Ingresos y anoten el sueldo líquido de cada uno. Con eso se activan la carga financiera, la capacidad de ahorro y todos los consejos personalizados.'}); }
  else{
   const pct=Math.round(s.carga*100);
@@ -671,6 +806,14 @@ function genConsejos(s){
  if(ex.length)C.push({nivel:'warn',icon:'💳',titulo:'Tarjetas sobre su cupo',texto:ex.map(d=>d.nombre).join(', ')+' están por sobre su límite. Paguen el exceso y procuren mantener el uso bajo el 30% del cupo para cuidar el score crediticio.'});
  const objetivo=s.obligaciones*3;
  if(objetivo>0)C.push({nivel:'info',icon:'🛡️',titulo:'Fondo de emergencia recomendado',texto:'Apunten a '+fmt(objetivo)+' (3 meses de obligaciones: '+fmt(s.obligaciones)+'/mes). Pueden usar las cuentas de ahorro de BancoEstado o las Renta Diaria de Scotiabank, que son líquidas y rentan algo. Metas escalonadas: primero $100.000, luego 1 mes, luego 3.'});
+ const overB=Object.entries(db.presupuesto||{}).filter(([c,l])=>l>0&&(gC[c]||0)>l);
+ if(overB.length)C.push({nivel:'warn',icon:'🎛️',titulo:'Presupuestos excedidos: '+overB.length+' categoría(s)',texto:overB.map(([c,l])=>c+' ('+fmt(gC[c])+' de '+fmt(l)+')').join(', ')+'. Revisen esos gastos o ajusten el límite si fue demasiado optimista.'});
+ else if(Object.keys(db.presupuesto||{}).length)C.push({nivel:'ok',icon:'🎛️',titulo:'Presupuestos bajo control',texto:'Ninguna categoría con presupuesto ha superado su límite este mes. ¡Sigan así!'});
+ else C.push({nivel:'info',icon:'🎛️',titulo:'Definan presupuestos por categoría',texto:'En la página Gastos → botón "🎛️ Presupuestos" pueden establecer un límite mensual por categoría. La app les avisará cuando se pasen.'});
+ const ingAct=ingresoFamiliar();
+ const ult3=mesesHist().slice(-3);
+ let neg=0; ult3.forEach(m=>{ const i=(db.histoIngresos[m]!=null?db.histoIngresos[m]:ingAct); if(i-gastoDeMes(m)<0)neg++; });
+ if(neg>=2&&ingAct>0)C.push({nivel:'warn',icon:'📉',titulo:'Balance negativo recurrente',texto:'En '+neg+' de los últimos '+ult3.length+' meses los gastos superaron los ingresos. Revisen el Histórico para ver la tendencia y busquen recortar categorías no esenciales.'});
  if(db.metas.length){ const ah=db.metas.reduce((a,m)=>a+(+m.ahorrado||0),0); const obj=db.metas.reduce((a,m)=>a+(+m.objetivo||0),0);
   C.push({nivel:'info',icon:'🎯',titulo:'Metas de ahorro: '+Math.round(ah/(obj||1)*100)+'% de avance',texto:'Llevan '+fmt(ah)+' ahorrados de '+fmt(obj)+' en '+db.metas.length+' meta(s). Mantengan abonos constantes; automaticen una transferencia el día de sueldo.'}); }
  if(db.cuentas.length>25)C.push({nivel:'info',icon:'🏦',titulo:db.cuentas.length+' cuentas y billeteras registradas',texto:'Tener tantas cuentas activas dificulta el control y puede generar costos de mantención o fraudes dormidos. Revisen cuáles no usan hace 6+ meses y considérenlas cerrar. Las prepago sin uso (Tenpo, Prex, Global66, etc.) suelen ser fáciles de cerrar.'});
@@ -697,18 +840,23 @@ function vAjustes(){
  +'<button class="btn primary" onclick="passModal()">'+(hasPass?'Cambiar contraseña':'Crear contraseña')+'</button>'
  +(hasPass?'<button class="btn badb" onclick="quitarPass()">Quitar contraseña</button>':'')
  +'</div>'
- +'<p class="mut small">⚠️ Esta contraseña protege el acceso visual a la app en este dispositivo. Los datos siguen en el navegador; para datos sensibles (CVV, números de tarjeta) usen la bóveda cifrada. Si olvidas la contraseña, deberás borrar los datos del navegador para volver a entrar.</p>'
+ +'<p class="mut small">⚠️ Esta contraseña protege el acceso visual a la app en este dispositivo. Si la olvidas, deberás borrar los datos del navegador para volver a entrar.</p>'
  +'</div>'
- +'<div class="card"><h3>🔐 Privacidad y respaldo</h3><p class="mut">Todos los datos se guardan <b>localmente en este navegador</b> (localStorage). Nada sale de tu equipo. Para respaldar o migrar entre dispositivos, exporta el JSON.</p>'
- +'<div class="toolbar"><button class="btn primary" onclick="exportar()">⬇️ Exportar datos (JSON)</button>'
- +'<button class="btn" onclick="document.getElementById(\'impFile\').click()">⬆️ Importar datos</button>'
- +'<input type="file" id="impFile" accept=".json" hidden onchange="importar(this)">'
+ +'<div class="card"><h3>💾 Respaldos</h3><p class="mut">Los datos se guardan <b>localmente en este navegador</b>. Para respaldar o migrar entre dispositivos:</p>'
+ +'<div class="toolbar">'
+ +'<button class="btn primary" onclick="exportar()">⬇️ Exportar JSON</button>'
+ +'<button class="btn primary" onclick="expCifradoModal()">🔐 Exportar cifrado (.finz)</button>'
+ +'<button class="btn" onclick="document.getElementById(\'impFile\').click()">⬆️ Importar (JSON o .finz)</button>'
+ +'<input type="file" id="impFile" accept=".json,.finz" hidden onchange="importar(this)">'
+ +'</div>'
+ +'<p class="mut small">El respaldo <b>cifrado</b> protege el archivo con una contraseña: quien lo importe deberá escribirla. Guárdenla bien, porque sin ella no se puede recuperar el contenido.</p>'
+ +'<div class="toolbar" style="margin-top:12px">'
  +'<button class="btn warnb" onclick="resetSeed()">♻️ Restaurar datos base</button>'
  +'<button class="btn badb" onclick="wipe()">🗑️ Borrar todo</button></div></div>'
  +'<div class="card"><h3>📌 Notas</h3><ul class="mut small">'
- +'<li>Si luego suben la app a internet, los datos seguirán en el navegador de cada dispositivo; usen Exportar/Importar para sincronizar entre equipos.</li>'
+ +'<li>Si suben la app a internet, los datos seguirán en el navegador de cada dispositivo; usen Exportar/Importar para sincronizar entre equipos.</li>'
  +'<li>Para datos sensibles de tarjetas (CVV, números completos) prefieran su bóveda cifrada (boveda_segura.html).</li>'
- +'<li>Recomendación: actualicen saldos, deudas, gastos y servicios una vez al mes (ideal el día 1) y exporten un respaldo.</li></ul></div>';
+ +'<li>Recomendación: actualicen saldos, deudas, gastos y servicios una vez al mes (ideal el día 1) y exporten un respaldo cifrado.</li></ul></div>';
 }
 function passModal(){
  showModal({title:db.config.passHash?'Cambiar contraseña':'Crear contraseña',values:{},fields:[
@@ -730,9 +878,45 @@ function quitarPass(){
  }
 }
 function exportar(){ const blob=new Blob([JSON.stringify(db,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='finanzas_re_'+new Date().toISOString().slice(0,10)+'.json'; a.click(); }
-function importar(inp){ const f=inp.files[0]; if(!f)return; const r=new FileReader(); r.onload=e=>{ try{ const d=JSON.parse(e.target.result); if(!d.deudas||!d.cuentas)throw 0; db=d; save(); render(); alert('Datos importados correctamente ✅'); }catch(err){ alert('Archivo inválido ❌'); } }; r.readAsText(f); inp.value=''; }
+function expCifradoModal(){
+ showModal({title:'Exportar respaldo cifrado',values:{},fields:[
+  {n:'p1',l:'Contraseña del respaldo',type:'password',req:1},
+  {n:'p2',l:'Repite la contraseña',type:'password',req:1}
+ ],submit:data=>{
+  if(data.p1.length<4){ alert('La contraseña debe tener al menos 4 caracteres.'); return false; }
+  if(data.p1!==data.p2){ alert('Las contraseñas no coinciden.'); return false; }
+  const enc=encryptBackup(JSON.stringify(db),data.p1);
+  const blob=new Blob([JSON.stringify(enc)],{type:'application/octet-stream'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='finanzas_re_cifrado_'+new Date().toISOString().slice(0,10)+'.finz'; a.click();
+ }});
+}
+function aplicarImport(d){
+ db=d;
+ db.gastos=db.gastos||[]; db.metas=db.metas||[]; db.config=db.config||{passHash:null,passSalt:null};
+ db.presupuesto=db.presupuesto||{}; db.histoIngresos=db.histoIngresos||{};
+ save(); render();
+}
+function importar(inp){
+ const f=inp.files[0]; if(!f)return;
+ const r=new FileReader();
+ r.onload=e=>{
+  let obj; try{ obj=JSON.parse(e.target.result); }catch(err){ alert('Archivo inválido ❌'); inp.value=''; return; }
+  if(obj&&obj.v===1&&obj.data&&obj.tag){
+   pendingBackup=obj;
+   showModal({title:'🔐 Respaldo cifrado detectado',values:{},fields:[{n:'pass',l:'Contraseña del respaldo',type:'password',req:1}],submit:data=>{
+    const plain=decryptBackup(pendingBackup,data.pass);
+    if(plain==null){ alert('Contraseña incorrecta o archivo corrupto ❌'); return false; }
+    try{ const d=JSON.parse(plain); if(!d.deudas||!d.cuentas)throw 0; aplicarImport(d); alert('Respaldo cifrado importado correctamente ✅'); }
+    catch(err){ alert('El contenido del respaldo es inválido ❌'); }
+   }});
+  } else if(obj&&obj.deudas&&obj.cuentas){
+   aplicarImport(obj); alert('Datos importados correctamente ✅');
+  } else alert('Archivo inválido ❌');
+ };
+ r.readAsText(f); inp.value='';
+}
 function resetSeed(){ if(confirm('¿Restaurar los datos base (los del Excel original)? Se perderán los cambios actuales.')){ db=seed(); save(); render(); } }
-function wipe(){ if(confirm('¿Borrar TODOS los datos?')){ db={ingresos:[],deudas:[],servicios:[],cuentas:[],gastos:[],metas:[],config:{passHash:null,passSalt:null}}; save(); render(); } }
+function wipe(){ if(confirm('¿Borrar TODOS los datos?')){ db={ingresos:[],deudas:[],servicios:[],cuentas:[],gastos:[],metas:[],presupuesto:{},histoIngresos:{},config:{passHash:null,passSalt:null}}; save(); render(); } }
 
 /* ============ MODAL ============ */
 function showModal(o){
@@ -757,8 +941,8 @@ function showModal(o){
 function closeModal(){ $('#modal').innerHTML=''; }
 
 /* ============ ROUTER ============ */
-const VIEWS={dashboard:vDashboard,deudas:vDeudas,servicios:vServicios,gastos:vGastos,cuentas:vCuentas,ingresos:vIngresos,metas:vMetas,proyecciones:vProy,consejos:vConsejos,ajustes:vAjustes};
-const TITLES={dashboard:'📊 Dashboard',deudas:'💳 Deudas',servicios:'🔌 Servicios y pagos',gastos:'💸 Gastos variables',cuentas:'🏦 Cuentas',ingresos:'💵 Ingresos',metas:'🎯 Metas de ahorro',proyecciones:'📈 Proyecciones',consejos:'💡 Consejos financieros',ajustes:'⚙️ Ajustes'};
+const VIEWS={dashboard:vDashboard,deudas:vDeudas,servicios:vServicios,gastos:vGastos,historico:vHist,cuentas:vCuentas,ingresos:vIngresos,metas:vMetas,proyecciones:vProy,consejos:vConsejos,ajustes:vAjustes};
+const TITLES={dashboard:'📊 Dashboard',deudas:'💳 Deudas',servicios:'🔌 Servicios y pagos',gastos:'💸 Gastos variables',historico:'📉 Histórico mensual',cuentas:'🏦 Cuentas',ingresos:'💵 Ingresos',metas:'🎯 Metas de ahorro',proyecciones:'📈 Proyecciones',consejos:'💡 Consejos financieros',ajustes:'⚙️ Ajustes'};
 let view='dashboard';
 function nav(v){
  view=v;
@@ -769,13 +953,14 @@ function nav(v){
  if(v==='deudas')fillDeudas();
  if(v==='servicios')fillServ();
  if(v==='gastos')fillGastos();
+ if(v==='historico')fillHist();
  if(v==='cuentas')fillCuentas();
  if(v==='metas')fillMetas();
  if(v==='proyecciones'){ calcAhorro(); calcDeuda(); }
  window.scrollTo(0,0);
 }
 function render(){ nav(view); }
-let rT; window.addEventListener('resize',()=>{ clearTimeout(rT); rT=setTimeout(()=>{ if(view==='dashboard')drawDash(); if(view==='gastos')fillGastos(); if(view==='proyecciones')calcAhorro(); },200); });
+let rT; window.addEventListener('resize',()=>{ clearTimeout(rT); rT=setTimeout(()=>{ if(view==='dashboard')drawDash(); if(view==='gastos')fillGastos(); if(view==='historico')fillHist(); if(view==='proyecciones')calcAhorro(); },200); });
 
 /* ============ BLOQUEO ============ */
 function initLock(){
