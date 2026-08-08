@@ -2,8 +2,15 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#6d7ff5">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Finanzas R&E">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%236d7ff5'/%3E%3Cpath d='M22 32 h48 a8 8 0 0 1 8 8 v24 a8 8 0 0 1 -8 8 h-48 a8 8 0 0 1 -8 -8 v-24 a8 8 0 0 1 8 -8 z' fill='none' stroke='white' stroke-width='5'/%3E%3Cpath d='M62 48 h16 v12 h-16 a6 6 0 0 1 0 -12 z' fill='%2322d3ee'/%3E%3Ccircle cx='70' cy='54' r='2.5' fill='white'/%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%236d7ff5'/%3E%3Cpath d='M22 32 h48 a8 8 0 0 1 8 8 v24 a8 8 0 0 1 -8 8 h-48 a8 8 0 0 1 -8 -8 v-24 a8 8 0 0 1 8 -8 z' fill='none' stroke='white' stroke-width='5'/%3E%3Cpath d='M62 48 h16 v12 h-16 a6 6 0 0 1 0 -12 z' fill='%2322d3ee'/%3E%3Ccircle cx='70' cy='54' r='2.5' fill='white'/%3E%3C/svg%3E">
 <title>Finanzas R&E · Ricardo & Elías</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -92,6 +99,9 @@ ul{padding-left:20px;line-height:1.8}
 .lockbox h2{font-size:1.2rem}.lockbox input{width:100%}.lockbox button{width:100%}
 .hist-mini{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .hist-chip{background:var(--p2);border:1px solid var(--br);border-radius:8px;padding:3px 8px;font-size:.68rem;color:var(--mut)}
+#installBanner{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--p);border:1px solid var(--acc);border-radius:16px;padding:16px;display:none;align-items:center;gap:12px;z-index:90;box-shadow:0 10px 30px rgba(0,0,0,.5);max-width:90%}
+#installBanner .ib-text{font-size:.85rem}
+#installBanner button{padding:8px 16px;border-radius:8px;border:none;cursor:pointer;font-weight:600}
 @media(max-width:980px){
  #app{flex-direction:column}
  aside{width:100%;height:auto;position:static;flex-direction:row;align-items:center;gap:10px;padding:12px}
@@ -104,6 +114,14 @@ ul{padding-left:20px;line-height:1.8}
 </style>
 </head>
 <body>
+
+<!-- Banner flotante para instalar la app -->
+<div id="installBanner">
+  <div style="font-size:24px">💼</div>
+  <div class="ib-text"><b>Instala Finanzas R&E</b><br><span class="mut small">Accede más rápido desde tu pantalla de inicio</span></div>
+  <button class="btn primary" id="btnInstall" style="padding:8px 16px">Instalar</button>
+  <button class="btn" id="btnDismiss" style="padding:8px 12px">✕</button>
+</div>
 
 <div id="lockScreen" style="display:none">
   <div class="lockbox">
@@ -336,7 +354,6 @@ function load(){ try{const r=localStorage.getItem(KEY); if(r){const d=JSON.parse
   if(d.config.notif==null)d.config.notif=false;
   d.presupuesto=d.presupuesto||{}; d.histoIngresos=d.histoIngresos||{};
   d.sync=d.sync||{enabled:false,url:'',room:'',apiKey:'',email:''};
-  if(d.sync.apiKey==null)d.sync.apiKey='';
   d.updatedAt=d.updatedAt||0;
   d.deudas.forEach(x=>{ if(x.archivado===undefined)x.archivado=false; });
   d.cuentas.forEach(x=>{ if(x.archivado===undefined)x.archivado=false; });
@@ -990,7 +1007,7 @@ function fillMetas(){
      guia='<p class="small" style="margin-top:8px;color:#2dd4a7">✅ ¡Meta cumplida!</p>';
    }
    const autoBadge=mt.aporteAuto>0?(mt.ultimoAporte===m?'<span class="b ok">Aporte del mes aplicado</span>':'<span class="b warn">Aporte del mes pendiente</span>'):'';
-   const hist=(mt.historial||[]).slice(-4).reverse().map(h=>'<span class="hist-chip">'+mesLabelCorto(h.mes)+' +'+fmt(h.monto)+(h.tipo==='auto'?' ⚡':' ✋')+'</span>').join('');
+   const hist=(mt.historial||[]).slice(-4).reverse().map(h=>'<span class="hist-chip">'+mesLabelCorto(h.mes)+' +'+fmt(h.monto)+(h.tipo==='auto'?' ⚡':' ')+'</span>').join('');
    return '<div class="card">'
      +'<div class="person-head"><span class="avatar" style="background:'+color+'">'+esc((mt.nombre||'?')[0])+'</span><div><h3>'+esc(mt.nombre)+'</h3><div class="mut small">'+esc(mt.responsable||'—')+'</div></div>'
      +'<div style="margin-left:auto" class="acts"><button class="ibtn" title="Abonar" onclick="abonoModal(\''+mt.id+'\')">💰</button><button class="ibtn" onclick="metaModal(\''+mt.id+'\')">✏️</button><button class="ibtn" onclick="delMeta(\''+mt.id+'\')">🗑️</button></div></div>'
@@ -1346,6 +1363,71 @@ function tryUnlock(){
  }
 }
 
+/* ============ PWA: INSTALACIÓN Y NOTIFICACIONES AUTOMÁTICAS ============ */
+let deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  // Mostrar banner si no se ha descartado recientemente
+  const dismissed = localStorage.getItem('finanzas_re_install_dismissed');
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  if (!dismissed && !isStandalone) {
+    const banner = $('#installBanner');
+    if (banner) banner.style.display = 'flex';
+  }
+});
+
+// Botones del banner de instalación
+document.addEventListener('DOMContentLoaded', () => {
+  const btnInstall = $('#btnInstall');
+  const btnDismiss = $('#btnDismiss');
+  if (btnInstall) {
+    btnInstall.onclick = async () => {
+      if (!deferredPrompt) return;
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        // Solicitar notificaciones inmediatamente después de aceptar la instalación
+        if ('Notification' in window && Notification.permission === 'default') {
+          Notification.requestPermission().then(p => {
+            if (p === 'granted') { db.config.notif = true; save(); }
+          });
+        }
+      }
+      deferredPrompt = null;
+      $('#installBanner').style.display = 'none';
+    };
+  }
+  if (btnDismiss) {
+    btnDismiss.onclick = () => {
+      $('#installBanner').style.display = 'none';
+      // No mostrar de nuevo por 7 días
+      localStorage.setItem('finanzas_re_install_dismissed', Date.now().toString());
+    };
+  }
+});
+
+// Registro del Service Worker (para funcionamiento offline y modo app)
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(err => console.log('SW error:', err));
+  });
+}
+
+// Solicitar permiso de notificaciones automáticamente en móviles (si no se ha decidido)
+function solicitarNotifMovil() {
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  if (isMobile && isStandalone && 'Notification' in window && Notification.permission === 'default') {
+    // Pequeño retraso para no interrumpir la carga
+    setTimeout(() => {
+      Notification.requestPermission().then(p => {
+        if (p === 'granted') { db.config.notif = true; save(); lanzarNotifs(); }
+      });
+    }, 2000);
+  }
+}
+
 /* ============ INICIO ============ */
 $('#hoy').textContent=hoy.toLocaleDateString('es-CL',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
 applyAutoAportes();
@@ -1355,6 +1437,7 @@ if(!db.config.passHash){
  lanzarNotifs();
  if(syncReady())startSync();
 }
+solicitarNotifMovil();
 </script>
 </body>
 </html>
