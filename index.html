@@ -48,7 +48,6 @@ header h1{font-size:1.35rem}.date{color:var(--mut);font-size:.85rem;text-transfo
 .toolbar{display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap}.toolbar .spacer{flex:1}
 select,input[type=text],input[type=number],input[type=date],input[type=search],input[type=password],input[type=month],textarea{background:var(--p2);border:1px solid var(--br);color:var(--tx);padding:9px 12px;border-radius:10px;font-size:.85rem;outline:none;font-family:inherit}
 select:focus,input:focus,textarea:focus{border-color:var(--acc)}
-textarea{width:100%;min-height:80px;resize:vertical}
 .chips{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
 .chip{background:var(--p);border:1px solid var(--br);padding:8px 14px;border-radius:999px;font-size:.82rem;color:var(--mut)}.chip b{color:var(--tx)}
 .mut{color:var(--mut)}.small{font-size:.75rem}.center{text-align:center}
@@ -79,6 +78,7 @@ canvas{width:100%;display:block}
 .consejo.ok{border-left-color:var(--ok)}.consejo.bad{border-left-color:var(--bd)}
 .consejo.warn{border-left-color:var(--wn)}.consejo.info{border-left-color:var(--cy)}
 .cicon{font-size:1.6rem}
+code{background:var(--p2);border:1px solid var(--br);border-radius:6px;padding:1px 6px;font-size:.78rem}
 #modal .back{position:fixed;inset:0;background:rgba(5,8,18,.72);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;z-index:50;padding:20px}
 #modal .box{background:var(--p);border:1px solid var(--br);border-radius:16px;padding:22px;width:100%;max-width:540px;max-height:90vh;overflow:auto}
 #modal h3{margin-bottom:16px}
@@ -123,6 +123,7 @@ ul{padding-left:20px;line-height:1.8}
    <a class="ni on" data-v="dashboard" onclick="nav('dashboard')">📊 Dashboard</a>
    <a class="ni" data-v="deudas" onclick="nav('deudas')">💳 Deudas</a>
    <a class="ni" data-v="servicios" onclick="nav('servicios')">🔌 Servicios y pagos</a>
+   <a class="ni" data-v="recordatorios" onclick="nav('recordatorios')">🔔 Recordatorios</a>
    <a class="ni" data-v="gastos" onclick="nav('gastos')">💸 Gastos</a>
    <a class="ni" data-v="historico" onclick="nav('historico')">📉 Histórico</a>
    <a class="ni" data-v="cuentas" onclick="nav('cuentas')">🏦 Cuentas</a>
@@ -323,14 +324,19 @@ function seed(){
   metas:[],
   presupuesto:{},
   histoIngresos:{},
-  sync:{enabled:false,url:'',room:''},
+  sync:{enabled:false,url:'',room:'',apiKey:'',email:''},
   updatedAt:0,
-  config:{passHash:null,passSalt:null}
+  config:{passHash:null,passSalt:null,anticipoDias:7,notif:false}
  };
 }
 function load(){ try{const r=localStorage.getItem(KEY); if(r){const d=JSON.parse(r); if(d&&d.deudas&&d.cuentas){
-  d.gastos=d.gastos||[]; d.metas=d.metas||[]; d.config=d.config||{passHash:null,passSalt:null};
-  d.presupuesto=d.presupuesto||{}; d.histoIngresos=d.histoIngresos||{}; d.sync=d.sync||{enabled:false,url:'',room:''};
+  d.gastos=d.gastos||[]; d.metas=d.metas||[];
+  d.config=d.config||{passHash:null,passSalt:null,anticipoDias:7,notif:false};
+  if(d.config.anticipoDias==null)d.config.anticipoDias=7;
+  if(d.config.notif==null)d.config.notif=false;
+  d.presupuesto=d.presupuesto||{}; d.histoIngresos=d.histoIngresos||{};
+  d.sync=d.sync||{enabled:false,url:'',room:'',apiKey:'',email:''};
+  if(d.sync.apiKey==null)d.sync.apiKey='';
   d.updatedAt=d.updatedAt||0;
   d.deudas.forEach(x=>{ if(x.archivado===undefined)x.archivado=false; });
   d.cuentas.forEach(x=>{ if(x.archivado===undefined)x.archivado=false; });
@@ -339,44 +345,117 @@ let db=load();
 function persist(){ try{localStorage.setItem(KEY,JSON.stringify(db));}catch(e){} }
 persist();
 
-/* ============ SINCRONIZACIÓN EN LA NUBE (Firebase REST) ============ */
+/* ============ SESIÓN EN LA NUBE (tokens locales, NO se sincronizan) ============ */
+const AUTHKEY='finanzas_re_auth_v1';
+let sess=loadSess();
+function loadSess(){ try{return JSON.parse(localStorage.getItem(AUTHKEY)||'null');}catch(e){return null;} }
+function saveSess(s){ sess=s; try{localStorage.setItem(AUTHKEY,JSON.stringify(s));}catch(e){} }
+function clearSess(){ sess=null; try{localStorage.removeItem(AUTHKEY);}catch(e){} }
+
+/* ============ SINCRONIZACIÓN + AUTENTICACIÓN FIREBASE (REST) ============ */
 let syncTimer=null, suppressPush=false;
 function syncReady(){ return db.sync&&db.sync.enabled&&db.sync.url&&db.sync.room; }
+function authRequired(){ return !!(db.sync&&db.sync.apiKey); }
 function syncPath(){ return db.sync.url.replace(/\/$/,'')+'/'+db.sync.room+'/data.json'; }
-function pushCloud(){
+function fbErr(m){
+ const map={'EMAIL_EXISTS':'Ese correo ya tiene cuenta. Usa "Iniciar sesión".','INVALID_PASSWORD':'Contraseña incorrecta.','EMAIL_NOT_FOUND':'No existe cuenta con ese correo.','INVALID_EMAIL':'Correo inválido.','WEAK_PASSWORD':'La contraseña debe tener al menos 6 caracteres.','TOO_MANY_ATTEMPTS_TRY_LATER':'Demasiados intentos. Espera unos minutos.','USER_DISABLED':'Cuenta deshabilitada.','INVALID_LOGIN_CREDENTIALS':'Correo o contraseña incorrectos.'};
+ return map[m]||m||'Error de autenticación';
+}
+async function fbSignUp(email,pass){
+ const r=await fetch('https://identitytoolkit.googleapis.com/v1/accounts:signUp?key='+encodeURIComponent(db.sync.apiKey),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email,password:pass,returnSecureToken:true})});
+ const j=await r.json().catch(()=>({}));
+ if(!r.ok)throw new Error(fbErr(j.error&&j.error.message));
+ return j;
+}
+async function fbSignIn(email,pass){
+ const r=await fetch('https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key='+encodeURIComponent(db.sync.apiKey),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email,password:pass,returnSecureToken:true})});
+ const j=await r.json().catch(()=>({}));
+ if(!r.ok)throw new Error(fbErr(j.error&&j.error.message));
+ return j;
+}
+async function fbRefresh(){
+ const r=await fetch('https://securetoken.googleapis.com/v1/token?key='+encodeURIComponent(db.sync.apiKey),{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'grant_type=refresh_token&refresh_token='+encodeURIComponent(sess.refreshToken)});
+ const j=await r.json().catch(()=>({}));
+ if(!r.ok||!j.id_token)throw new Error('Sesión expirada');
+ return j;
+}
+async function cloudToken(){
+ if(!sess)return null;
+ if(Date.now()>sess.expiresAt-120000){
+  try{
+   const j=await fbRefresh();
+   saveSess({email:sess.email,idToken:j.id_token,refreshToken:j.refresh_token,expiresAt:Date.now()+(+j.expires_in)*1000});
+  }catch(e){ clearSess(); render(); return null; }
+ }
+ return sess.idToken;
+}
+async function pushCloud(){
  if(!syncReady()||suppressPush)return;
- fetch(syncPath(),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({updatedAt:db.updatedAt,payload:db})})
-  .then(()=>{ db.sync.lastSync=Date.now(); persist(); if(view==='ajustes')updateSyncUI(); })
-  .catch(()=>{});
+ let q='';
+ if(authRequired()){
+  const t=await cloudToken();
+  if(!t){ if(view==='ajustes')updateSyncUI(); return; }
+  q='?auth='+encodeURIComponent(t);
+ }
+ try{
+  const r=await fetch(syncPath()+q,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({updatedAt:db.updatedAt,payload:db})});
+  if(r.status===401){ clearSess(); render(); return; }
+  if(r.ok){ db.sync.lastSync=Date.now(); persist(); if(view==='ajustes')updateSyncUI(); }
+ }catch(e){}
 }
-function pullCloud(){
+async function pullCloud(){
  if(!syncReady())return;
- fetch(syncPath()).then(r=>r.ok?r.json():null).then(remote=>{
-  if(remote&&remote.updatedAt&&remote.updatedAt>(db.updatedAt||0)){
+ let q='';
+ if(authRequired()){
+  const t=await cloudToken();
+  if(!t){ if(view==='ajustes')updateSyncUI(); return; }
+  q='?auth='+encodeURIComponent(t);
+ }
+ try{
+  const r=await fetch(syncPath()+q);
+  if(r.status===401){ clearSess(); render(); return; }
+  if(!r.ok)return;
+  const remote=await r.json();
+  if(!remote||!remote.payload){ if(db.updatedAt)await pushCloud(); return; }
+  if(remote.updatedAt>(db.updatedAt||0)){
    suppressPush=true;
-   db=remote.payload; persist(); render();
+   db=remote.payload; db.sync=db.sync||{enabled:false,url:'',room:'',apiKey:'',email:''};
+   persist(); render();
    setTimeout(()=>{suppressPush=false;},300);
-  }
-  if(remote){ db.sync=db.sync||{}; db.sync.lastSync=Date.now(); persist(); if(view==='ajustes')updateSyncUI(); }
- }).catch(()=>{});
+  } else if(db.updatedAt>remote.updatedAt){ await pushCloud(); }
+  db.sync.lastSync=Date.now(); persist();
+  if(view==='ajustes')updateSyncUI();
+ }catch(e){}
 }
-function startSync(){ if(syncTimer){clearInterval(syncTimer);syncTimer=null;} if(syncReady()){ pullCloud(); syncTimer=setInterval(pullCloud,10000); } }
+function startSync(){
+ if(syncTimer){clearInterval(syncTimer);syncTimer=null;}
+ if(!syncReady())return;
+ if(authRequired()&&!sess)return;
+ pullCloud();
+ syncTimer=setInterval(pullCloud,10000);
+}
 function save(){ db.updatedAt=Date.now(); persist(); pushCloud(); }
-function manualSync(){ if(!syncReady()){alert('Primero configura y activa la sincronización.');return;} pushCloud(); pullCloud(); alert('🔄 Sincronizando…'); }
+async function manualSync(){
+ if(!syncReady()){alert('Primero configura y activa la sincronización.');return;}
+ if(authRequired()&&!sess){alert('Inicia sesión primero.');return;}
+ await pushCloud(); await pullCloud(); alert('🔄 Sincronizado.');
+}
 function genRoom(){ let s='';const c='abcdefghijkmnpqrstuvwxyz23456789';for(let i=0;i<12;i++)s+=c[Math.floor(Math.random()*c.length)];return s; }
 function syncConfigModal(){
- showModal({title:'Configurar base de datos en la nube',values:{url:(db.sync&&db.sync.url)||''},fields:[
-  {n:'url',l:'URL de Firebase Realtime Database',ph:'https://tu-proyecto-default-rtdb.firebaseio.com'}
+ showModal({title:'Configurar sincronización en la nube',values:{url:(db.sync&&db.sync.url)||'',apiKey:(db.sync&&db.sync.apiKey)||''},fields:[
+  {n:'url',l:'URL de Firebase Realtime Database',req:1,ph:'https://tu-proyecto-default-rtdb.firebaseio.com'},
+  {n:'apiKey',l:'API Key de Firebase (recomendada: activa el acceso con cuenta)',ph:'AIza… (Configuración del proyecto → General)'}
  ],submit:data=>{
   let u=(data.url||'').trim();
   if(!u){ alert('Ingresa la URL de la base de datos.'); return false; }
   if(!/^https:\/\//i.test(u)){ alert('La URL debe comenzar con https://'); return false; }
   db.sync=db.sync||{}; db.sync.url=u.replace(/\/$/,'');
+  db.sync.apiKey=(data.apiKey||'').trim();
   if(!db.sync.room)db.sync.room=genRoom();
   save(); render();
  }});
 }
-function syncCode(){ return btoa(unescape(encodeURIComponent(JSON.stringify({u:db.sync.url,r:db.sync.room})))); }
+function syncCode(){ return btoa(unescape(encodeURIComponent(JSON.stringify({u:db.sync.url,r:db.sync.room,k:db.sync.apiKey||''})))); }
 function copySyncCode(){
  if(!db.sync||!db.sync.url){ alert('Primero configura la base de datos.'); return; }
  const c=syncCode();
@@ -390,8 +469,10 @@ function linkDeviceModal(){
   try{
    const o=JSON.parse(decodeURIComponent(escape(atob((data.code||'').trim()))));
    if(!o.u||!o.r)throw 0;
-   db.sync=db.sync||{}; db.sync.url=o.u; db.sync.room=o.r; db.sync.enabled=true;
-   save(); startSync(); render(); alert('✅ Dispositivo vinculado y sincronización activada.');
+   db.sync=db.sync||{}; db.sync.url=o.u; db.sync.room=o.r; db.sync.apiKey=o.k||''; db.sync.enabled=true;
+   save(); render();
+   if(authRequired()&&!sess){ alert('✅ Dispositivo vinculado. Ahora inicia sesión con la cuenta familiar.'); cloudLoginModal('in'); }
+   else { startSync(); alert('✅ Dispositivo vinculado y sincronización activada.'); }
   }catch(e){ alert('Código inválido. Cópialo completo desde el otro dispositivo.'); return false; }
  }});
 }
@@ -399,16 +480,103 @@ function toggleSync(){
  db.sync=db.sync||{};
  if(!db.sync.url){ syncConfigModal(); return; }
  db.sync.enabled=!db.sync.enabled; save();
- if(db.sync.enabled)startSync(); else { if(syncTimer){clearInterval(syncTimer);syncTimer=null;} }
+ if(db.sync.enabled){
+  if(authRequired()&&!sess){ cloudLoginModal('in'); }
+  else startSync();
+ } else {
+  if(syncTimer){clearInterval(syncTimer);syncTimer=null;}
+ }
  render();
 }
+function cloudLoginModal(mode){
+ showModal({title:mode==='up'?'➕ Crear cuenta familiar en la nube':'🔑 Iniciar sesión en la nube',values:{email:(db.sync&&db.sync.email)||''},fields:[
+  {n:'email',l:'Correo electrónico',req:1,ph:'familia@correo.com'},
+  {n:'pass',l:'Contraseña (mínimo 6 caracteres)',type:'password',req:1}
+ ],submit:async data=>{
+  if(!db.sync||!db.sync.apiKey){ alert('Primero configura la base de datos con su API Key.'); return false; }
+  try{
+   const j=mode==='up'?await fbSignUp(data.email,data.pass):await fbSignIn(data.email,data.pass);
+   saveSess({email:data.email,idToken:j.idToken,refreshToken:j.refreshToken,expiresAt:Date.now()+(+j.expiresIn)*1000});
+   db.sync.email=data.email;
+   db.updatedAt=Date.now(); persist();
+   alert(mode==='up'?'✅ Cuenta creada y sesión iniciada. Usen este mismo correo en ambos dispositivos.':'✅ Sesión iniciada.');
+   startSync();
+  }catch(e){ alert('❌ '+e.message); return false; }
+ }});
+}
+function cloudLogout(){ clearSess(); render(); }
 function updateSyncUI(){
  const st=$('#sync-status'); if(!st)return;
- if(!db.sync||!db.sync.url){ st.innerHTML='<div class="al warn">No configurada. Presiona <b>"Configurar base de datos"</b> para comenzar.</div>'; }
- else if(!db.sync.enabled){ st.innerHTML='<div class="al warn">Configurada pero <b>desactivada</b> · '+esc(db.sync.url.replace('https://',''))+'</div>'; }
- else { st.innerHTML='<div class="al ok">☁️ Sincronización <b>activa</b> · Sala <b>'+esc(db.sync.room)+'</b>'+(db.sync.lastSync?' · Últ. movimiento: '+new Date(db.sync.lastSync).toLocaleTimeString('es-CL'):'')+'</div>'; }
+ let html='';
+ if(!db.sync||!db.sync.url){
+  html='<div class="al warn">No configurada. Presiona <b>"Configurar base de datos"</b> para comenzar.</div>';
+ } else if(!db.sync.enabled){
+  html='<div class="al warn">Configurada pero <b>desactivada</b> · '+esc(db.sync.url.replace('https://',''))+'</div>';
+ } else if(authRequired()&&!sess){
+  html='<div class="al bad">🔑 Sincronización activa, pero <b>debes iniciar sesión</b> para proteger los datos.</div>';
+ } else if(authRequired()&&sess){
+  html='<div class="al ok">☁️ Sincronización <b>activa y protegida</b> · Cuenta: <b>'+esc(sess.email)+'</b>'+(db.sync.lastSync?' · Últ. mov.: '+new Date(db.sync.lastSync).toLocaleTimeString('es-CL'):'')+'</div>';
+ } else {
+  html='<div class="al ok">☁️ Sincronización <b>activa</b> · Sala <b>'+esc(db.sync.room)+'</b>'+(db.sync.lastSync?' · Últ. mov.: '+new Date(db.sync.lastSync).toLocaleTimeString('es-CL'):'')+'</div>';
+ }
+ st.innerHTML=html;
+ const au=$('#sync-auth'); if(!au)return;
+ if(authRequired()&&sess){ au.innerHTML='<button class="btn badb" onclick="cloudLogout()">🚪 Cerrar sesión</button>'; }
+ else if(authRequired()){ au.innerHTML='<button class="btn primary" onclick="cloudLoginModal(\'in\')">🔑 Iniciar sesión</button><button class="btn" onclick="cloudLoginModal(\'up\')">➕ Crear cuenta</button>'; }
+ else au.innerHTML='';
  const btn=$('#btnSyncToggle'); if(btn)btn.textContent=(db.sync&&db.sync.enabled)?'⏸️ Desactivar':'▶️ Activar';
- const det=$('#sync-detail'); if(det)det.innerHTML=db.sync&&db.sync.url?('URL: '+esc(db.sync.url)+'<br>Para conectar el celular: en él abre la app → Ajustes → "Vincular este dispositivo" y pega el código.'):'Crea una base gratis en <b>firebase.google.com</b> → Realtime Database, copia su URL y pégala en "Configurar base de datos".';
+ const det=$('#sync-detail'); if(det){
+  if(db.sync&&db.sync.url){
+   let t='URL: '+esc(db.sync.url)+' · Sala: '+esc(db.sync.room);
+   if(db.sync.apiKey)t+='<br>🔐 Acceso protegido con cuenta. En Firebase, define las reglas: <code>".read": "auth != null"</code> y <code>".write": "auth != null"</code>.';
+   else t+='<br>⚠️ Sin API Key la sincronización queda abierta. Recomendado: agrega la API Key y creen una cuenta familiar.';
+   det.innerHTML=t;
+  } else det.innerHTML='Crea un proyecto gratis en <b>firebase.google.com</b>: activa Realtime Database, activa Authentication (correo/contraseña), copia la URL y la API Key, y configúralas aquí.';
+ }
+}
+
+/* ============ RECORDATORIOS ============ */
+function recordatorios(){
+ const R=[];
+ db.servicios.filter(s=>s.estado!=='Pagada'&&s.vence).forEach(s=>{
+  R.push({tipo:'Servicio',nombre:s.nombre,monto:+s.monto||0,vence:s.vence,dias:diasHasta(s.vence),resp:s.responsable});
+ });
+ db.deudas.filter(x=>x.estado!=='Pagada'&&!x.archivado&&x.venc).forEach(x=>{
+  R.push({tipo:'Deuda',nombre:x.nombre,monto:+x.cuota||0,vence:x.venc,dias:diasHasta(x.venc),resp:x.responsable});
+ });
+ return R.sort((a,b)=>a.dias-b.dias);
+}
+function pedirNotif(){
+ if(!('Notification' in window)){ alert('Este navegador no soporta notificaciones.'); return; }
+ if(Notification.permission==='granted'){
+  db.config.notif=!db.config.notif; save();
+  alert(db.config.notif?'🔔 Notificaciones activadas.':'🔕 Notificaciones desactivadas.');
+  if(db.config.notif)lanzarNotifs();
+  render(); return;
+ }
+ Notification.requestPermission().then(p=>{
+  if(p==='granted'){ db.config.notif=true; save(); alert('🔔 Notificaciones activadas.'); lanzarNotifs(); render(); }
+  else alert('El navegador denegó el permiso de notificaciones.');
+ });
+}
+function lanzarNotifs(){
+ if(!db.config||!db.config.notif)return;
+ if(!('Notification' in window)||Notification.permission!=='granted')return;
+ const ant=db.config.anticipoDias==null?7:db.config.anticipoDias;
+ const hoyK=new Date().toDateString();
+ let vistos={}; try{vistos=JSON.parse(localStorage.getItem('finanzas_re_notif_vistos')||'{}');}catch(e){vistos={};}
+ const nuevos=[];
+ recordatorios().forEach(r=>{
+  if(r.dias<=ant){
+   const k=r.tipo+'|'+r.nombre+'|'+r.vence+'|'+(r.dias<0?'v':'p');
+   if(vistos[k]!==hoyK){ nuevos.push(r); vistos[k]=hoyK; }
+  }
+ });
+ try{localStorage.setItem('finanzas_re_notif_vistos',JSON.stringify(vistos));}catch(e){}
+ nuevos.slice(0,5).forEach(r=>{
+  const txt=r.dias<0?('⚠️ Venció hace '+(-r.dias)+' día(s)'):(r.dias===0?'¡Vence hoy!':('Vence en '+r.dias+' día(s)'));
+  try{ new Notification('💰 '+r.tipo+': '+r.nombre,{body:txt+' · '+fmt(r.monto)}); }catch(e){}
+ });
 }
 
 /* ============ CÁLCULOS ============ */
@@ -454,7 +622,11 @@ function alertas(s){
  if(s.mora.length)A.push({t:'bad',x:'<b>'+s.mora.length+' deudas en mora</b> por '+fmt(s.moraTotal)+'. Revisa la página de Consejos para ver el plan de pago sugerido.'});
  const ex=db.deudas.filter(d=>d.estado!=='Pagada'&&d.limite>0&&d.saldo>d.limite&&!d.archivado);
  if(ex.length)A.push({t:'warn',x:'<b>Sobregiro:</b> '+ex.map(d=>esc(d.nombre)).join(', ')+'. Eviten nuevas compras con esas tarjetas.'});
- db.servicios.filter(x=>x.estado!=='Pagada'&&x.vence).forEach(x=>{ const d=diasHasta(x.vence); if(d<0)A.push({t:'bad',x:'<b>'+esc(x.nombre)+'</b> venció hace '+(-d)+' días ('+fmt(x.monto)+').'}); else if(d<=7)A.push({t:'warn',x:'<b>'+esc(x.nombre)+'</b> vence en '+d+' día(s) ('+fmt(x.monto)+').'}); });
+ const recs=recordatorios();
+ const ant=db.config.anticipoDias==null?7:db.config.anticipoDias;
+ const vencN=recs.filter(r=>r.dias<0).length;
+ const proxN=recs.filter(r=>r.dias>=0&&r.dias<=ant).length;
+ if(vencN||proxN)A.push({t:vencN?'bad':'warn',x:'<b>🔔 '+vencN+' pago(s) vencido(s)</b> y '+proxN+' por vencer en '+ant+' días. Revisa <a class="link" onclick="nav(\'recordatorios\')">Recordatorios</a>.'});
  if(s.carga!=null&&s.carga>0.5)A.push({t:'bad',x:'<b>Carga financiera crítica:</b> el '+Math.round(s.carga*100)+'% de los ingresos se va en obligaciones (recomendado: bajo 35%).'});
  else if(s.carga!=null&&s.carga>0.35)A.push({t:'warn',x:'<b>Carga financiera alta:</b> '+Math.round(s.carga*100)+'% de los ingresos en obligaciones.'});
  const gC=gastosPorCat(mesActual());
@@ -471,9 +643,12 @@ function vDashboard(){
  const pct=s.carga==null?'—':Math.round(s.carga*100)+'%';
  const cargaClass=s.carga==null?'':(s.carga>0.5?'bad':s.carga>0.35?'warn':'ok');
  const alerts=alertas(s);
- const venc=db.servicios.filter(x=>x.vence&&x.estado!=='Pagada').sort((a,b)=>a.vence<b.vence?-1:1).slice(0,6);
  const metasAh=db.metas.reduce((a,m)=>a+(+m.ahorrado||0),0);
  const libre=s.ingresos-s.obligaciones-s.gastos-s.autoAporte;
+ const ant=db.config.anticipoDias==null?7:db.config.anticipoDias;
+ const recs=recordatorios();
+ const prox=recs.filter(r=>r.dias<=ant);
+ const vencN=prox.filter(r=>r.dias<0).length;
  return '<div class="kpis">'
  +kpi('💵','Ingresos mensuales',s.ingresos?fmt(s.ingresos):'Sin registrar','Ricardo + Elías',s.ingresos?'':'warn')
  +kpi('🏦','Deuda total activa',fmt(s.deudaTotal),s.nDeudas+' productos activos')
@@ -482,17 +657,24 @@ function vDashboard(){
  +kpi('🎯','Ahorro programado',fmt(s.autoAporte),'Aporte automático a metas')
  +kpi('🧮','Libre del mes',fmt(libre),s.ingresos?'Ingresos − obligaciones − gastos − ahorro':'Registra ingresos',s.ingresos?(libre>=0?'ok':'bad'):'warn')
  +kpi('🏅','Ahorrado en metas',fmt(metasAh),db.metas.length+' meta(s)')
+ +kpi('🔔','Pagos por vencer',prox.length,vencN?vencN+' vencido(s)':'Próximos '+ant+' días',vencN?'bad':(prox.length?'warn':'ok'))
  +kpi('🚨','Deudas en mora',fmt(s.moraTotal),s.mora.length+' deudas',s.mora.length?'bad':'ok')
  +kpi('⚖️','Carga financiera',pct,'Obligaciones / ingresos',cargaClass)
  +'</div>'
  +(alerts.length?'<div class="card alerts"><h3>🚨 Alertas</h3>'+alerts.map(a=>'<div class="al '+a.t+'">'+a.x+'</div>').join('')+'</div>':'')
  +'<div class="grid2"><div class="card"><h3>Deuda por responsable</h3><div class="donutwrap"><canvas id="cDonut"></canvas><div id="donutLeg" class="leg"></div></div></div>'
  +'<div class="card"><h3>Top deudas</h3><div id="topDeudas"></div></div></div>'
- +'<div class="card"><h3>📆 Vencimientos de servicios pendientes</h3>'
- +(venc.length?'<div class="tscroll"><table class="tbl"><thead><tr><th>Servicio</th><th>Monto</th><th>Vence</th><th>Situación</th></tr></thead><tbody>'
-   +venc.map(x=>{const d=diasHasta(x.vence); const tag=d<0?'<span class="b bad">Vencido hace '+(-d)+' d</span>':'<span class="b '+(d<=7?'warn':'ok')+'">En '+d+' d</span>';
-   return '<tr><td>'+esc(x.nombre)+'</td><td>'+fmt(x.monto)+'</td><td>'+fdate(x.vence)+'</td><td>'+tag+'</td></tr>';}).join('')
-   +'</tbody></table></div>':'<p class="mut">No hay servicios pendientes. 🎉</p>')
+ +'<div class="card"><button class="btn" style="float:right;padding:5px 12px;font-size:.78rem" onclick="nav(\'recordatorios\')">Ver todos</button><h3>🔔 Próximos vencimientos (servicios y deudas)</h3>'
+ +(recs.length?'<div class="tscroll"><table class="tbl"><thead><tr><th>Situación</th><th>Tipo</th><th>Nombre</th><th>Monto</th><th>Vence</th></tr></thead><tbody>'
+  +recs.slice(0,8).map(r=>{
+   let tag;
+   if(r.dias<0)tag='<span class="b bad">Vencido hace '+(-r.dias)+' d</span>';
+   else if(r.dias===0)tag='<span class="b bad">¡Hoy!</span>';
+   else if(r.dias<=ant)tag='<span class="b warn">En '+r.dias+' d</span>';
+   else tag='<span class="b acc">En '+r.dias+' d</span>';
+   return '<tr><td>'+tag+'</td><td>'+(r.tipo==='Deuda'?'💳':'🔌')+' '+r.tipo+'</td><td>'+esc(r.nombre)+'</td><td>'+fmt(r.monto)+'</td><td>'+fdate(r.vence)+'</td></tr>';
+  }).join('')
+  +'</tbody></table></div>':'<p class="mut">Nada pendiente. 🎉</p>')
  +'</div>';
 }
 function drawDash(){
@@ -575,6 +757,40 @@ function servModal(id){
 }
 function toggleServ(id){ const s=db.servicios.find(x=>x.id===id); s.estado=s.estado==='Pagada'?'Pendiente':'Pagada'; save(); fillServ(); }
 function delServ(id){ const s=db.servicios.find(x=>x.id===id); if(confirm('¿Eliminar "'+s.nombre+'"?')){ db.servicios=db.servicios.filter(x=>x.id!==id); save(); fillServ(); } }
+
+/* --- Recordatorios --- */
+function vRecordatorios(){
+ const ant=db.config.anticipoDias==null?7:db.config.anticipoDias;
+ return '<div class="toolbar">'
+ +'<span class="chip">Avisar con <b>'+ant+' día(s)</b> de anticipación</span>'
+ +'<select onchange="db.config.anticipoDias=+this.value;save();render()">'+[3,5,7,10,15].map(n=>'<option value="'+n+'" '+(ant===n?'selected':'')+'>'+n+' días</option>').join('')+'</select>'
+ +'<span class="spacer"></span>'
+ +'<button class="btn" onclick="pedirNotif()">'+(db.config.notif?'🔕 Desactivar notificaciones':'🔔 Activar notificaciones del navegador')+'</button>'
+ +'</div>'
+ +'<div id="rec-status"></div>'
+ +'<div id="rec-list"></div>'
+ +'<div class="card"><h3>ℹ️ Cómo funcionan</h3><p class="mut small">Los recordatorios se calculan con las fechas de vencimiento de <b>servicios</b> y <b>deudas</b> (manténganlas actualizadas). Las notificaciones del navegador aparecen al abrir la app, máximo 1 aviso por pago al día. En celular funcionan mejor en Android (Chrome); en iPhone, agreguen la página a la pantalla de inicio.</p></div>';
+}
+function fillRecordatorios(){
+ const ant=db.config.anticipoDias==null?7:db.config.anticipoDias;
+ const R=recordatorios();
+ const urgentes=R.filter(r=>r.dias>=0&&r.dias<=ant);
+ $('#rec-status').innerHTML='<div class="chips">'
+ +'<span class="chip">Vencidos: <b>'+R.filter(r=>r.dias<0).length+'</b></span>'
+ +'<span class="chip">Vencen hoy: <b>'+R.filter(r=>r.dias===0).length+'</b></span>'
+ +'<span class="chip">Próximos '+ant+' días: <b>'+urgentes.length+'</b></span>'
+ +'</div>';
+ $('#rec-list').innerHTML='<div class="card nopad"><div class="tscroll"><table class="tbl"><thead><tr><th>Urgencia</th><th>Tipo</th><th>Nombre</th><th>Monto</th><th>Vence</th><th>Responsable</th></tr></thead><tbody>'
+ +R.map(r=>{
+   let tag;
+   if(r.dias<0)tag='<span class="b bad">Vencido hace '+(-r.dias)+' d</span>';
+   else if(r.dias===0)tag='<span class="b bad">¡Vence hoy!</span>';
+   else if(r.dias<=ant)tag='<span class="b warn">En '+r.dias+' d</span>';
+   else tag='<span class="b acc">En '+r.dias+' d</span>';
+   return '<tr><td>'+tag+'</td><td>'+(r.tipo==='Deuda'?'💳':'🔌')+' '+r.tipo+'</td><td><b>'+esc(r.nombre)+'</b></td><td>'+fmt(r.monto)+'</td><td>'+fdate(r.vence)+'</td><td>'+esc(r.resp||'—')+'</td></tr>';
+ }).join('')
+ +'</tbody></table></div></div>';
+}
 
 /* --- Gastos + Presupuesto --- */
 const CATEGORIAS=['Supermercado','Transporte','Comida y Restaurant','Salud','Educación','Entretención','Ropa y Calzado','Hogar','Mascotas','Suscripciones','Otros'];
@@ -745,7 +961,7 @@ function ingModal(id){
 }
 function delIng(id){ if(confirm('¿Eliminar este ingreso?')){ db.ingresos=db.ingresos.filter(x=>x.id!==id); save(); render(); } }
 
-/* --- Metas con aporte automático --- */
+/* --- Metas --- */
 const META_COLORS=['#6d7ff5','#22d3ee','#34d399','#f59e0b','#f472b6','#a78bfa','#fbbf24','#38bdf8'];
 function vMetas(){
  return '<div class="toolbar"><button class="btn" onclick="applyAndRender()">⚡ Aplicar aportes del mes</button><span class="spacer"></span><button class="btn primary" onclick="metaModal()">＋ Nueva meta de ahorro</button></div>'
@@ -924,7 +1140,7 @@ function genConsejos(s){
  if(db.metas.length){ const ah=db.metas.reduce((a,mt)=>a+(+mt.ahorrado||0),0); const obj=db.metas.reduce((a,mt)=>a+(+mt.objetivo||0),0);
   C.push({nivel:'info',icon:'🎯',titulo:'Metas de ahorro: '+Math.round(ah/(obj||1)*100)+'% de avance',texto:'Llevan '+fmt(ah)+' de '+fmt(obj)+' en '+db.metas.length+' meta(s).'}); }
  const cAct=cuentasActivas();
- if(cAct.length>25)C.push({nivel:'info',icon:'🏦',titulo:cAct.length+' cuentas activas registradas',texto:'Revisen cuáles no usan hace 6+ meses y archívenlas (📦) para simplificar el control. Las prepago sin uso suelen ser fáciles de cerrar.'});
+ if(cAct.length>25)C.push({nivel:'info',icon:'🏦',titulo:cAct.length+' cuentas activas registradas',texto:'Revisen cuáles no usan hace 6+ meses y archívenlas (📦) para simplificar el control.'});
  return C;
 }
 function vConsejos(){
@@ -971,7 +1187,7 @@ function hardDelCuenta(id){ const c=db.cuentas.find(x=>x.id===id); if(confirm('�
 function vAjustes(){
  const hasPass=!!db.config.passHash;
  return '<div class="card"><h3>☁️ Sincronización entre dispositivos</h3>'
- +'<p class="mut">Conecta la app a una base de datos gratuita en la nube (Firebase) para que el PC y el celular vean la misma información automáticamente, sin exportar/importar.</p>'
+ +'<p class="mut">Conecta la app a una base gratuita en la nube (Firebase). Con la API Key activada, solo quienes inicien sesión con la cuenta familiar pueden leer o escribir los datos.</p>'
  +'<div id="sync-status"></div>'
  +'<div class="toolbar">'
  +'<button class="btn" onclick="syncConfigModal()">🔧 Configurar base de datos</button>'
@@ -980,6 +1196,7 @@ function vAjustes(){
  +'<button class="btn" onclick="copySyncCode()">📋 Copiar código</button>'
  +'<button class="btn" onclick="manualSync()">🔄 Sincronizar ahora</button>'
  +'</div>'
+ +'<div class="toolbar" id="sync-auth"></div>'
  +'<p class="mut small" id="sync-detail"></p>'
  +'</div>'
  +'<div class="card"><h3>🔑 Contraseña de acceso</h3>'
@@ -1027,8 +1244,12 @@ function expCifradoModal(){
 }
 function aplicarImport(d){
  db=d;
- db.gastos=db.gastos||[]; db.metas=db.metas||[]; db.config=db.config||{passHash:null,passSalt:null};
- db.presupuesto=db.presupuesto||{}; db.histoIngresos=db.histoIngresos||{}; db.sync=db.sync||{enabled:false,url:'',room:''};
+ db.gastos=db.gastos||[]; db.metas=db.metas||[];
+ db.config=db.config||{passHash:null,passSalt:null,anticipoDias:7,notif:false};
+ if(db.config.anticipoDias==null)db.config.anticipoDias=7;
+ if(db.config.notif==null)db.config.notif=false;
+ db.presupuesto=db.presupuesto||{}; db.histoIngresos=db.histoIngresos||{};
+ db.sync=db.sync||{enabled:false,url:'',room:'',apiKey:'',email:''};
  db.deudas=db.deudas||[]; db.cuentas=db.cuentas||[];
  db.deudas.forEach(x=>{ if(x.archivado===undefined)x.archivado=false; });
  db.cuentas.forEach(x=>{ if(x.archivado===undefined)x.archivado=false; });
@@ -1052,8 +1273,8 @@ function importar(inp){
  };
  r.readAsText(f); inp.value='';
 }
-function resetSeed(){ if(confirm('¿Restaurar los datos base? Se perderán los cambios.')){ db=seed(); persist(); render(); } }
-function wipe(){ if(confirm('¿Borrar TODOS los datos?')){ db=seed(); db.ingresos=[];db.deudas=[];db.servicios=[];db.cuentas=[];db.gastos=[];db.metas=[]; persist(); render(); } }
+function resetSeed(){ if(confirm('¿Restaurar los datos base? Se perderán los cambios (se propagará a los dispositivos sincronizados).')){ db=seed(); save(); render(); } }
+function wipe(){ if(confirm('¿Borrar TODOS los datos? (También se propagará a los dispositivos sincronizados)')){ db=seed(); db.ingresos=[];db.deudas=[];db.servicios=[];db.cuentas=[];db.gastos=[];db.metas=[]; save(); render(); } }
 
 /* ============ MODAL ============ */
 function showModal(o){
@@ -1065,21 +1286,24 @@ function showModal(o){
   return '<label>'+esc(f.l)+ctl+'</label>';
  }).join('');
  root.innerHTML='<div class="back" onclick="if(event.target===this)closeModal()"><div class="box"><h3>'+esc(o.title)+'</h3><form>'+rows+'<div class="acts2"><button type="button" class="btn" onclick="closeModal()">Cancelar</button><button type="button" class="btn primary" id="msave">Guardar</button></div></form></div></div>';
- $('#msave').onclick=()=>{
+ $('#msave').onclick=async()=>{
   const form=root.querySelector('form');
   if(!form.reportValidity())return;
   const data={};
   o.fields.forEach(f=>{ const el=form.querySelector('[name="'+f.n+'"]'); data[f.n]=f.type==='number'?(parseFloat(el.value)||0):el.value.trim(); });
-  const r=o.submit(data);
-  if(r===false)return;
-  closeModal(); render();
+  const btn=$('#msave'); btn.disabled=true; btn.textContent='Guardando…';
+  try{
+   const r=await o.submit(data);
+   if(r===false){ btn.disabled=false; btn.textContent='Guardar'; return; }
+   closeModal(); render();
+  }catch(e){ btn.disabled=false; btn.textContent='Guardar'; }
  };
 }
 function closeModal(){ $('#modal').innerHTML=''; }
 
 /* ============ ROUTER ============ */
-const VIEWS={dashboard:vDashboard,deudas:vDeudas,servicios:vServicios,gastos:vGastos,historico:vHist,cuentas:vCuentas,ingresos:vIngresos,metas:vMetas,proyecciones:vProy,consejos:vConsejos,archivo:vArchivo,ajustes:vAjustes};
-const TITLES={dashboard:'📊 Dashboard',deudas:'💳 Deudas',servicios:'🔌 Servicios y pagos',gastos:'💸 Gastos variables',historico:'📉 Histórico mensual',cuentas:'🏦 Cuentas',ingresos:'💵 Ingresos',metas:'🎯 Metas de ahorro',proyecciones:'📈 Proyecciones',consejos:'💡 Consejos financieros',archivo:'🗄️ Archivo',ajustes:'⚙️ Ajustes'};
+const VIEWS={dashboard:vDashboard,deudas:vDeudas,servicios:vServicios,recordatorios:vRecordatorios,gastos:vGastos,historico:vHist,cuentas:vCuentas,ingresos:vIngresos,metas:vMetas,proyecciones:vProy,consejos:vConsejos,archivo:vArchivo,ajustes:vAjustes};
+const TITLES={dashboard:'📊 Dashboard',deudas:'💳 Deudas',servicios:'🔌 Servicios y pagos',recordatorios:'🔔 Recordatorios',gastos:'💸 Gastos variables',historico:'📉 Histórico mensual',cuentas:'🏦 Cuentas',ingresos:'💵 Ingresos',metas:'🎯 Metas de ahorro',proyecciones:'📈 Proyecciones',consejos:'💡 Consejos financieros',archivo:'🗄️ Archivo',ajustes:'⚙️ Ajustes'};
 let view='dashboard';
 function nav(v){
  view=v;
@@ -1089,6 +1313,7 @@ function nav(v){
  if(v==='dashboard')drawDash();
  if(v==='deudas')fillDeudas();
  if(v==='servicios')fillServ();
+ if(v==='recordatorios')fillRecordatorios();
  if(v==='gastos')fillGastos();
  if(v==='historico')fillHist();
  if(v==='cuentas')fillCuentas();
@@ -1114,6 +1339,8 @@ function tryUnlock(){
   $('#lockScreen').style.display='none';
   $('#lockPass').value='';
   $('#lockError').textContent='';
+  lanzarNotifs();
+  if(syncReady())startSync();
  } else {
   $('#lockError').textContent='Contraseña incorrecta. Intenta de nuevo.';
  }
@@ -1124,7 +1351,10 @@ $('#hoy').textContent=hoy.toLocaleDateString('es-CL',{weekday:'long',day:'numeri
 applyAutoAportes();
 nav('dashboard');
 initLock();
-if(syncReady())startSync();
+if(!db.config.passHash){
+ lanzarNotifs();
+ if(syncReady())startSync();
+}
 </script>
 </body>
 </html>
