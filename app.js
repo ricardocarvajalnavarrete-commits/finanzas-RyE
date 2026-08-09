@@ -158,6 +158,10 @@ function cicloRestante(d){
 function saldoFacturado(d){
  return Math.max(0,(Number(d.montoFacturadoMes)||0)-abonosCiclo(d));
 }
+function saldoTotalPendiente(d){
+ const pagado=db.pagos.filter(p=>p.deudaId===d.id).reduce((s,p)=>s+(Number(p.monto)||0),0);
+ return Math.max(0,(Number(d.montoTotal)||0)-pagado);
+}
 function diasMora(d){return (d.estado==='morosa'&&d.vencimiento)?Math.max(0,days(d.vencimiento,today())):null;}
 function moraChip(d){
  const n=diasMora(d); if(n===null)return '';
@@ -340,7 +344,8 @@ function openPagoModal(id){
    <div class="list-item"><span>Pago mínimo</span><b>${fmt(min)}</b></div>
    <div class="list-item"><span>Abonado este ciclo</span><b>${fmt(abonosCiclo(d))}</b></div>
    <div class="list-item"><span>Saldo pago mínimo</span><b>${cicloRestante(d)<=0?'<span class="al-dia">Cuenta al Día ✅</span>':fmt(cicloRestante(d))}</b></div>
-   <div class="list-item"><span>Saldo total facturado</span><b>${saldoFacturado(d)<=0?'<span class="al-dia">Cuenta al Día ✅</span>':fmt(saldoFacturado(d))}</b></div>
+    <div class="list-item"><span>Saldo total facturado</span><b>${saldoFacturado(d)<=0?'<span class="al-dia">Cuenta al Día ✅</span>':fmt(saldoFacturado(d))}</b></div>
+   <div class="list-item"><span>Saldo total pendiente deuda</span><b>${fmt(saldoTotalPendiente(d))}</b></div>  <div class="list-item"><span>Saldo total facturado</span><b>${saldoFacturado(d)<=0?'<span class="al-dia">Cuenta al Día ✅</span>':fmt(saldoFacturado(d))}</b></div>
   </div>
   <form id="frm_pago">
    <div class="row2">${inp('p_fecha','Fecha del pago',today(),'date')}${inp('p_monto','Monto pagado ($)','','number','required min="1"')}</div>
@@ -368,7 +373,8 @@ function renderDeudas(){
     <span>⬇️ Pago mínimo: <b>${d.tienePagoMinimo?fmt(d.pagoMinimo):fmt(minPago(d))+(d.tienePagoMinimo?'':' (= facturado)')}</b></span>
     <span>📅 Vencimiento: <b>${d.sinVencimiento?'Sin vencimiento':dstr(d.vencimiento)}</b></span>
     <span>👛 Saldo pago mínimo: ${d.estado==='pagada'?'<span class="al-dia">Pagada ✅</span>':rest<=0?'<span class="al-dia">Cuenta al Día ✅</span>':'<b class="err">'+fmt(rest)+'</b>'}</span>
-    <span>🧮 Saldo total facturado: ${d.estado==='pagada'?'<span class="al-dia">Pagada ✅</span>':saldoFacturado(d)<=0?'<span class="al-dia">Cuenta al Día ✅</span>':'<b>'+fmt(saldoFacturado(d))+'</b>'}</span>
+    <    <span>🧮 Saldo total facturado: ${d.estado==='pagada'?'<span class="al-dia">Pagada ✅</span>':saldoFacturado(d)<=0?'<span class="al-dia">Cuenta al Día ✅</span>':'<b>'+fmt(saldoFacturado(d))+'</b>'}</span>
+    <span>💼 Saldo total pendiente deuda: <b>${fmt(saldoTotalPendiente(d))}</b></span>span>🧮 Saldo total facturado: ${d.estado==='pagada'?'<span class="al-dia">Pagada ✅</span>':saldoFacturado(d)<=0?'<span class="al-dia">Cuenta al Día ✅</span>':'<b>'+fmt(saldoFacturado(d))+'</b>'}</span>
    </div>
    <div class="acts">
     ${d.estado!=='pagada'&&!d.archivada?`<button class="btn pri mini" data-act="pago" data-id="${d.id}">💰 Pago</button>`:''}
