@@ -613,11 +613,16 @@ function renderAjustes(){
  <div class="card"><h3>🔐 Contraseña</h3>
  ${db.auth?'<p>✅ La app está protegida con contraseña.</p><button class="btn" data-act="chg-pass">Cambiar contraseña</button> <button class="btn warn" data-act="rm-pass">Quitar contraseña</button>'
  :'<p>Sin contraseña. Se recomienda activarla, especialmente si subes la app a internet.</p><button class="btn pri" data-act="set-pass">🔑 Establecer contraseña</button>'}</div>
+ <div class="card"><h3>👆 Huella / Face ID</h3>
+ <p>Estado: <b>${localStorage.getItem('billetera_bio')?'✅ activada en este dispositivo':'⚪ no activada'}</b></p>
+ <p class="mut">Desbloquea la app con tu huella o Face ID solo en este celular. La contraseña sigue siendo la llave maestra para otros dispositivos y los respaldos cifrados.</p>
+ <button class="btn pri" data-act="bio-on">Activar en este dispositivo</button>
+ <button class="btn warn" data-act="bio-off">Desactivar</button></div>
  <div class="card"><h3>🔔 Notificaciones</h3><p>Estado: <b>${noti==='granted'?'✅ Permitidas':noti==='denied'?'❌ Bloqueadas (actívalas en el navegador)':'⚪ No solicitadas'}</b></p>
  <p class="mut">Se avisa de vencimientos próximos y deudas en mora cada vez que abres la app.</p>
  ${inp('aviso','Avisar vencimientos con anticipación (días)',db.ajustes.diasAviso??5,'number')}
  <button class="btn pri" data-act="notif-perm">🔔 Activar notificaciones</button> <button class="btn" data-act="save-aviso">Guardar días</button></div>
- <div class="card"><h3>📱 Instalar app</h3><p class="mut">En el celular: usa el menú del navegador → “Agregar a pantalla de inicio” o el banner de instalación. En iPhone: Compartir → Agregar a inicio.</p><button class="btn pri" data-act="install">📲 Instalar ahora</button></div>
+ <div class="card"><h3>📱 Instalar app</h3><p class="mut">En el celular: usa el menú del navegador → "Agregar a pantalla de inicio" o el banner de instalación. En iPhone: Compartir → Agregar a inicio.</p><button class="btn pri" data-act="install">📲 Instalar ahora</button></div>
  <div class="card"><h3>💾 Respaldos cifrados</h3><p class="mut">El respaldo se cifra con AES-256 usando la contraseña que elijas (formato compatible con tu bóveda).</p>
  <div class="row"><button class="btn pri" data-act="exp-cif">⬇️ Exportar respaldo cifrado</button><button class="btn" data-act="imp-cif">⬆️ Importar respaldo cifrado</button></div>
  <div class="row" style="margin-top:8px"><button class="btn soft" data-act="exp-json">Exportar JSON simple</button><button class="btn soft" data-act="imp-json">Importar JSON</button></div></div>
@@ -630,7 +635,6 @@ function renderAjustes(){
  <div class="card"><h3>🧹 Datos</h3><button class="btn warn" data-act="reset">⚠️ Borrar todos los datos y reiniciar</button></div>`;
  const fa=$('#fb-act');if(fa)fa.onchange=e=>{db.fb.activo=e.target.checked;save();toast(db.fb.activo?'☁️ Sincronización activada':'Sincronización desactivada');};
 }
-
 /* ============================== CRIPTOGRAFÍA ============================== */
 const enc=s=>new TextEncoder().encode(s), dec=b=>new TextDecoder().decode(b);
 async function pbkdf2Key(pass,ssalt,use){
@@ -651,6 +655,28 @@ function passModal(titulo,btn,cb){
   save();closeModal();cb&&cb(a);toast('🔐 Contraseña guardada');};
 }
 
+/* ============================== HUELLA / FACE ID (WebAuthn) ============================== */
+const b64u=b=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+const b64uBuf=s=>{s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';const bin=atob(s);const u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return u.buffer;};
+async function bioAvailable(){if(!window.PublicKeyCredential)return false;try{return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();}catch(e){return false;}}
+async function bioEnroll(){
+ const cred=await navigator.credentials.create({publicKey:{
+  challenge:crypto.getRandomValues(new Uint8Array(32)),
+  rp:{name:'Billetera Familiar'},
+  user:{id:crypto.getRandomValues(new Uint8Array(16)),name:'billetera',displayName:'Billetera Familiar'},
+  pubKeyCredParams:[{type:'public-key',alg:-7},{type:'public-key',alg:-257}],
+  authenticatorSelection:{authenticatorAttachment:'platform',userVerification:'required'},
+  timeout:60000}});
+ localStorage.setItem('billetera_bio',b64u(cred.rawId));
+}
+async function bioUnlock(){
+ const id=localStorage.getItem('billetera_bio');if(!id)return false;
+ const cred=await navigator.credentials.get({publicKey:{
+  challenge:crypto.getRandomValues(new Uint8Array(32)),
+  allowCredentials:[{type:'public-key',id:b64uBuf(id)}],
+  userVerification:'required',timeout:60000}});
+ return !!cred;
+}
 /* ============================== FIREBASE ============================== */
 const fb={app:null,auth:null,dbfs:null,user:null,loaded:false};
 function parseFB(txt){
@@ -795,7 +821,9 @@ document.addEventListener('click',e=>{
   case 'set-pass':passModal('🔑 Establecer contraseña','Crear');break;
   case 'chg-pass':passModal('🔑 Cambiar contraseña','Cambiar');break;
   case 'rm-pass':confirmDlg('Quitar contraseña','¿Seguro? La app quedará sin protección.',()=>{db.auth=null;save();render();toast('Contraseña eliminada');});break;
-  case 'notif-perm':if('Notification'in window)Notification.requestPermission().then(()=>{render();toast('🔔 Permiso: '+Notification.permission);});else toast('No soportado');break;
+   case 'bio-on':(async()=>{if(!db.auth)return toast('⚠️ Primero establece una contraseña');if(!(await bioAvailable()))return toast('❌ El navegador no ofrece huella/Face ID');try{await bioEnroll();toast('✅ Desbloqueo biométrico activado');renderAjustes();}catch(e){toast('❌ Operación cancelada');}})();break;
+  case 'bio-off':localStorage.removeItem('billetera_bio');renderAjustes();toast('Desbloqueo biométrico desactivado');break;
+    case 'notif-perm':if('Notification'in window)Notification.requestPermission().then(()=>{render();toast('🔔 Permiso: '+Notification.permission);});else toast('No soportado');break;
   case 'save-aviso':db.ajustes.diasAviso=+$('#aviso').value||5;save();toast('💾 Guardado');break;
   case 'install':installApp();break;
   case 'exp-cif':passModal('🔐 Contraseña para cifrar el respaldo','Cifrar y descargar',async pass=>{
@@ -835,18 +863,21 @@ $('#install-x').onclick=()=>$('#install-banner').classList.add('hidden');
 window.addEventListener('appinstalled',()=>{$('#install-banner').classList.add('hidden');toast('🎉 ¡App instalada!');if('Notification'in window&&Notification.permission==='default')Notification.requestPermission();});
 
 /* ============================== BLOQUEO / ARRANQUE ============================== */
+function doUnlock(){unlocked=true;$('#lock-screen').classList.add('hidden');$('#app').classList.remove('hidden');render();revisarRecordatorios();aplicarAportesMes();}
 async function tryUnlock(){
  const p=$('#lock-pass').value;
  const h=await hashPass(p,new Uint8Array(db.auth.salt));
- if(JSON.stringify(h)===JSON.stringify(db.auth.hash)){unlocked=true;$('#lock-screen').classList.add('hidden');$('#app').classList.remove('hidden');render();revisarRecordatorios();aplicarAportesMes();}
+ if(JSON.stringify(h)===JSON.stringify(db.auth.hash))doUnlock();
  else $('#lock-err').textContent='Contraseña incorrecta';
 }
-$('#lock-btn').onclick=()=>{unlocked=false;$('#app').classList.add('hidden');$('#lock-screen').classList.remove('hidden');$('#lock-pass').value='';};
-$('#lock-btn').hidden=false;
-$('#lock-btn').addEventListener('click',()=>{});
-document.getElementById('lock-btn').onclick=()=>{if(!db.auth)return;unlocked=false;$('#app').classList.add('hidden');$('#lock-screen').classList.remove('hidden');};
-$('#lock-btn')&&($('#lock-btn').onclick=()=>{});
-$('#lock-btn').replaceWith($('#lock-btn').cloneNode(true));
+function showBioButton(){
+ if(!localStorage.getItem('billetera_bio')||$('#lock-bio'))return;
+ const b=document.createElement('button');
+ b.id='lock-bio';b.className='btn pri';b.style.marginTop='8px';b.textContent='👆 Desbloquear con huella / Face ID';
+ b.onclick=async()=>{try{if(await bioUnlock())doUnlock();}catch(e){$('#lock-err').textContent='Huella no reconocida. Usa tu contraseña.';}};
+ $('.lock-card').insertBefore(b,$('#lock-btn'));
+}
+// Continuación del código de arranque
 document.querySelector('#btn-lock').onclick=()=>{if(!db.auth)return toast('Sin contraseña activa (actívala en Ajustes)');unlocked=false;$('#app').classList.add('hidden');$('#lock-screen').classList.remove('hidden');};
 $('#lock-btn').onclick=tryUnlock;
 $('#lock-pass').addEventListener('keydown',e=>{if(e.key==='Enter')tryUnlock();});
@@ -854,7 +885,8 @@ window.addEventListener('resize',()=>{if(curView==='historico')drawChart();});
 
 init();
 renderNav();
-if(db.auth&&!unlocked){$('#lock-screen').classList.remove('hidden');}
+if(db.auth&&!unlocked){$('#lock-screen').classList.remove('hidden');showBioButton();
+ bioUnlock().then(ok=>{if(ok)doUnlock();}).catch(()=>{});}
 else{unlocked=true;$('#lock-screen').classList.add('hidden');$('#app').classList.remove('hidden');render();revisarRecordatorios();aplicarAportesMes();}
 initFB();
 if('Notification'in window&&Notification.permission==='default'){setTimeout(()=>{if(confirm('¿Deseas recibir recordatorios de vencimiento de deudas?'))Notification.requestPermission();},4000);}
