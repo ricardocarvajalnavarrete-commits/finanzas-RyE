@@ -463,8 +463,8 @@ const mask=n=>{const s=String(n||'').replace(/\s/g,'');return s.length>4?'••
 function renderCuentas(){
  const cs=db.cuentas.filter(c=>!c.archivada), ts=db.tarjetas.filter(t=>!t.archivada);
  $('#ct-cuentas').innerHTML=`
- <div class="row between"><h2>🏛️ Cuentas y tarjetas</h2><span class="row">
-  <button class="btn soft" data-act="toggle-nums">${showNums?'🙈 Ocultar números':'👁 Mostrar números'}</button>
+<div class="row between"><h2>🏛️ Cuentas y tarjetas</h2><span class="row">
+  <a href="https://ricardocarvajalnavarrete-commits.github.io/boveda-bancaria/" target="_blank" rel="noopener" class="btn pri">🔐 Cuentas y Tarjetas</a>  <button class="btn soft" data-act="toggle-nums">${showNums?'🙈 Ocultar números':'👁 Mostrar números'}</button>
   <button class="btn pri" data-act="new-cuenta">➕ Cuenta</button>
   <button class="btn pri" data-act="new-tarjeta">➕ Tarjeta</button></span></div>
  <div class="card"><h3>Cuentas bancarias (${cs.length})</h3><div class="tblwrap"><table>
