@@ -270,7 +270,8 @@ function renderDashboard(){
  let proy='';
  if(prom!==0){proy=[1,3,6,12].map(k=>`<div class="list-item"><span>Proyección a ${k} mes${k>1?'es':''}</span><b class="${saldo+prom*k<0?'err':'al-dia'}">${fmt(saldo+prom*k)}</b></div>`).join('');}
  $('#ct-dashboard').innerHTML=`
- <div class="row between"> <div class="row between"><h2>🏠 Panel de control</h2><button class="btn pri" data-act="exp-excel">📊 Descargar Excel</button></div><button class="btn pri" data-act="exp-excel">📊 Descargar Excel</button></div> <div class="grid mini">
+ <div class="row between"><h2>🏠 Panel de control</h2><button class="btn pri" data-act="exp-excel">📊 Descargar Excel</button></div>
+ <div class="grid mini">
   <div class="card kpi ${totalDeuda>0?'warn':'ok'}"><div class="lbl">Deudas activas</div><div class="val">${fmt(totalDeuda)}</div><div class="mut">${activas.length} deudas · cuota mes ${fmt(cuotaMes)}</div></div>
   <div class="card kpi ${morosas.length?'warn':'ok'}"><div class="lbl">En mora</div><div class="val">${morosas.length}</div><div class="mut">deuda morosa ${fmt(morosas.reduce((s,d)=>s+(d.saldoTotal||0),0))}</div></div>
   <div class="card kpi"><div class="lbl">Ingresos del mes</div><div class="val">${fmt(ingMes)}</div></div>
@@ -343,8 +344,8 @@ function openPagoModal(id){
    <div class="list-item"><span>Pago mínimo</span><b>${fmt(min)}</b></div>
    <div class="list-item"><span>Abonado este ciclo</span><b>${fmt(abonosCiclo(d))}</b></div>
    <div class="list-item"><span>Saldo pago mínimo</span><b>${cicloRestante(d)<=0?'<span class="al-dia">Cuenta al Día ✅</span>':fmt(cicloRestante(d))}</b></div>
-    <div class="list-item"><span>Saldo total facturado</span><b>${saldoFacturado(d)<=0?'<span class="al-dia">Cuenta al Día ✅</span>':fmt(saldoFacturado(d))}</b></div>
-   <div class="list-item"><span>Saldo total pendiente deuda</span><b>${fmt(saldoTotalPendiente(d))}</b></div>  <div class="list-item"><span>Saldo total facturado</span><b>${saldoFacturado(d)<=0?'<span class="al-dia">Cuenta al Día ✅</span>':fmt(saldoFacturado(d))}</b></div>
+   <div class="list-item"><span>Saldo total facturado</span><b>${saldoFacturado(d)<=0?'<span class="al-dia">Cuenta al Día ✅</span>':fmt(saldoFacturado(d))}</b></div>
+   <div class="list-item"><span>Saldo total pendiente deuda</span><b>${fmt(saldoTotalPendiente(d))}</b></div>
   </div>
   <form id="frm_pago">
    <div class="row2">${inp('p_fecha','Fecha del pago',today(),'date')}${inp('p_monto','Monto pagado ($)','','number','required min="1"')}</div>
