@@ -1,3 +1,4 @@
+console.log('👛 Billetera v2 — parche pagos + firebase');
 'use strict';
 /* ============================== UTILIDADES ============================== */
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
@@ -644,10 +645,22 @@ function passModal(titulo,btn,cb){
 
 /* ============================== FIREBASE ============================== */
 const fb={app:null,auth:null,dbfs:null,user:null,loaded:false};
+function parseFB(txt){
+  txt=String(txt||'').trim()
+    .replace(/^(export\s+)?(const|let|var)\s+firebaseConfig\s*=\s*/i,'')
+    .replace(/;\s*$/,'');
+  if(txt&&!txt.startsWith('{'))txt='{'+txt;
+  if(txt&&!txt.endsWith('}'))txt+='}';
+  try{return JSON.parse(txt);}catch(e){}
+  const fixed=txt
+    .replace(/,\s*}/g,'}')
+    .replace(/([{,]\s*)([A-Za-z0-9_]+)\s*:/g,'$1"$2":');
+  return JSON.parse(fixed);
+}
 async function initFB(){
  if(!db.fb.config)return;
  try{
-  const cfg=JSON.parse(db.fb.config);
+  const cfg=parseFB(db.fb.config);
   const {initializeApp}=await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js');
   const {getAuth,onAuthStateChanged}=await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js');
   const {getFirestore}=await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js');
