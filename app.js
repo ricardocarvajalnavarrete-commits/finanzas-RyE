@@ -217,7 +217,7 @@ function renderNav(){$('#mainnav').innerHTML=VIEWS.map(([v,i,l])=>`<button class
 function go(v){curView=v;renderNav();$$('.view').forEach(s=>s.classList.toggle('hidden',s.id!=='view-'+v));render();window.scrollTo({top:0});}
 function render(){
  evaluarDeudas();
- ({dashboard:renderDashboard,deudas:renderDeudas,pagos:renderPagos,acreedores:renderAcreedores,cuentas:renderCuentas,
+    return `<div class="list-item"><span><b>${esc(a.nombre)}</b> <span class="mut">(${n} deuda${n===1?'':'s'})</span>${(a.nota||'')?`<div class="mut" style="font-size:.82em;margin-top:2px">📝 ${esc(a.nota)}</div>`:''}</span>
    presupuesto:renderPresupuesto,gastos:renderGastos,metas:renderMetas,historico:renderHistorico,archivo:renderArchivo,ajustes:renderAjustes}[curView]||(()=>{}))();
 }
 
@@ -403,39 +403,26 @@ function renderAcreedores(){
   const list=db.acreedores.filter(a=>a.tipo===t);
   return `<div class="card"><div class="row between"><h3>${l}</h3><button class="btn pri mini" data-act="new-ac" data-id="${t}">➕ Añadir</button></div>
   ${list.map(a=>{const n=db.deudas.filter(d=>d.acreedorId===a.id).length;
-   return `<div class="list-item"><span>${esc(a.nombre)} <span class="mut">(${n} deuda${n===1?'':'s'})</span></span>
+      return `<div class="list-item"><span><b>${esc(a.nombre)}</b> <span class="mut">(${n} deuda${n===1?'':'s'})</span>${(a.nota||'')?`<div class="mut" style="font-size:.82em;margin-top:2px">📝 ${esc(a.nota)}</div>`:''}</span>
    <span class="row"><button class="btn mini" data-act="edit-ac" data-id="${a.id}">✏️</button><button class="btn warn mini" data-act="del-ac" data-id="${a.id}">🗑️</button></span></div>`;}).join('')||'<p class="mut">Sin registros.</p>'}</div>`;
  }).join('');
 }
 function acModal(tipo,id){
- const a=id?acById(id):{tipo,nombre:''};
- openModal(id?'✏️ Editar acreedor':'➕ Nuevo acreedor',`<form id="frm_ac">${sel('ac_tipo','Tipo',AC_TIPOS,a.tipo)}${inp('ac_nom','Nombre',a.nombre)}<div class="frm-btns"><button class="btn pri">💾 Guardar</button><button class="btn" type="button" data-act="close-modal">Cancelar</button></div></form>`);
- $('#frm_ac').onsubmit=e=>{e.preventDefault();const nom=$('#ac_nom').value.trim(),ti=$('#ac_tipo').value;if(!nom)return;
-  if(id){a.nombre=nom;a.tipo=ti;}else db.acreedores.push({id:uid(),tipo:ti,nombre:nom});
-  save();closeModal();render();toast('💾 Acreedor guardado');};
-}
-
-/* ============================== CUENTAS Y TARJETAS ============================== */
-const mask=n=>{const s=String(n||'').replace(/\s/g,'');return s.length>4?'•••• •••• '+s.slice(-4):s;};
-function renderCuentas(){
- const cs=db.cuentas.filter(c=>!c.archivada), ts=db.tarjetas.filter(t=>!t.archivada);
- $('#ct-cuentas').innerHTML=`
- <div class="row between"><h2>🏛️ Cuentas y tarjetas</h2><span class="row">
-  <button class="btn soft" data-act="toggle-nums">${showNums?'🙈 Ocultar números':'👁 Mostrar números'}</button>
-  <button class="btn pri" data-act="new-cuenta">➕ Cuenta</button>
-  <button class="btn pri" data-act="new-tarjeta">➕ Tarjeta</button></span></div>
- <div class="card"><h3>Cuentas bancarias (${cs.length})</h3><div class="tblwrap"><table>
- <tr><th>Titular</th><th>Banco</th><th>Tipo</th><th>Número</th><th>Moneda</th><th>Estado</th><th></th></tr>
- ${cs.map(c=>`<tr><td>${esc(c.persona)}</td><td>${esc(c.banco)}</td><td>${esc(c.tipo)}${c.nombre?'<br><span class="mut">'+esc(c.nombre)+'</span>':''}</td>
-  <td class="mask">${showNums?esc(c.numero):mask(c.numero)}</td><td>${c.moneda}</td><td>${c.estado}</td>
-  <td><button class="btn mini" data-act="edit-cuenta" data-id="${c.id}">✏️</button><button class="btn mini" data-act="arch-cuenta" data-id="${c.id}">📦</button></td></tr>`).join('')}
- </table></div></div>
- <div class="card"><h3>Tarjetas (${ts.length})</h3><div class="tblwrap"><table>
- <tr><th>Titular</th><th>Entidad</th><th>Tipo</th><th>Formato</th><th>Número</th><th>Vence</th><th></th></tr>
- ${ts.map(t=>`<tr><td>${esc(t.persona)}</td><td>${esc(t.entidad)}</td><td>${esc(t.tipo)}</td><td>${t.formato==='Física'?'💳':'🌐'} ${t.formato}</td>
-  <td class="mask">${showNums?esc(t.numero):mask(t.numero)}</td><td>${t.venc||'—'}</td>
-  <td><button class="btn mini" data-act="edit-tarjeta" data-id="${t.id}">✏️</button><button class="btn mini" data-act="arch-tarjeta" data-id="${t.id}">📦</button></td></tr>`).join('')}
- </table></div><p class="mut">🔐 Por seguridad, ingresa números completos y CVV solo con la app protegida con contraseña, y usa respaldos cifrados.</p></div>`;
+ const a=id?acById(id):{tipo,nombre:'',nota:''};
+ openModal(id?'✏️ Editar acreedor':'➕ Nuevo acreedor',`<form id="frm_ac">
+  ${sel('ac_tipo','Tipo',AC_TIPOS,a.tipo)}
+  ${inp('ac_nom','Nombre',a.nombre)}
+  <label class="fld"><span>📝 Nota (opcional)</span><textarea id="ac_nota" placeholder="Ej: contacto, teléfono, condiciones del préstamo…">${esc(a.nota||'')}</textarea></label>
+  <div class="frm-btns"><button class="btn pri">💾 Guardar</button><button class="btn" type="button" data-act="close-modal">Cancelar</button></div>
+ </form>`);
+ $('#frm_ac').onsubmit=e=>{
+  e.preventDefault();
+  const nom=$('#ac_nom').value.trim(),ti=$('#ac_tipo').value,nota=$('#ac_nota').value.trim();
+  if(!nom)return toast('⚠️ Escribe un nombre para el acreedor');
+  if(id){a.nombre=nom;a.tipo=ti;a.nota=nota;}
+  else db.acreedores.push({id:uid(),tipo:ti,nombre:nom,nota:nota});
+  save();closeModal();render();toast('💾 Acreedor guardado');
+ };
 }
 function cuentaModal(id){
  const c=id?db.cuentas.find(x=>x.id===id):{persona:db.personas[0],moneda:'CLP',estado:'Activa'};
