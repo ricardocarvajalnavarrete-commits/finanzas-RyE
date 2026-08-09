@@ -7,7 +7,7 @@ const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
 const dstr=d=>{if(!d)return '—';const[y,m,dd]=String(d).split('-');return `${dd}-${m}-${y}`;};
 const days=(a,b)=>Math.round((new Date(b+'T12:00')-new Date(a+'T12:00'))/86400000);
-const addMonth=d=>{const t=new Date(d+'T12:00');t.setMonth(t.getMonth()+1);return t.toISOString().slice(0,10);};
+const addMonth=(d,n=1)=>{const t=new Date(d+'T12:00');t.setMonth(t.getMonth()+n);return t.toISOString().slice(0,10);};
 const mkey=d=>String(d).slice(0,7);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const inp=(id,label,val='',type='text',extra='')=>`<label class="fld"><span>${label}</span><input id="${id}" type="${type}" value="${esc(val)}" ${extra}></label>`;
@@ -373,8 +373,8 @@ function renderDeudas(){
     <span>⬇️ Pago mínimo: <b>${d.tienePagoMinimo?fmt(d.pagoMinimo):fmt(minPago(d))+(d.tienePagoMinimo?'':' (= facturado)')}</b></span>
     <span>📅 Vencimiento: <b>${d.sinVencimiento?'Sin vencimiento':dstr(d.vencimiento)}</b></span>
     <span>👛 Saldo pago mínimo: ${d.estado==='pagada'?'<span class="al-dia">Pagada ✅</span>':rest<=0?'<span class="al-dia">Cuenta al Día ✅</span>':'<b class="err">'+fmt(rest)+'</b>'}</span>
-    <    <span>🧮 Saldo total facturado: ${d.estado==='pagada'?'<span class="al-dia">Pagada ✅</span>':saldoFacturado(d)<=0?'<span class="al-dia">Cuenta al Día ✅</span>':'<b>'+fmt(saldoFacturado(d))+'</b>'}</span>
-    <span>💼 Saldo total pendiente deuda: <b>${fmt(saldoTotalPendiente(d))}</b></span>span>🧮 Saldo total facturado: ${d.estado==='pagada'?'<span class="al-dia">Pagada ✅</span>':saldoFacturado(d)<=0?'<span class="al-dia">Cuenta al Día ✅</span>':'<b>'+fmt(saldoFacturado(d))+'</b>'}</span>
+    <span>🧮 Saldo total facturado: ${d.estado==='pagada'?'<span class="al-dia">Pagada ✅</span>':saldoFacturado(d)<=0?'<span class="al-dia">Cuenta al Día ✅</span>':'<b>'+fmt(saldoFacturado(d))+'</b>'}</span>
+    <span>💼 Saldo total pendiente deuda: <b>${fmt(saldoTotalPendiente(d))}</b></span>
    </div>
    <div class="acts">
     ${d.estado!=='pagada'&&!d.archivada?`<button class="btn pri mini" data-act="pago" data-id="${d.id}">💰 Pago</button>`:''}
