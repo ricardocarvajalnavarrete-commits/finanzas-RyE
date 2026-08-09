@@ -270,8 +270,7 @@ function renderDashboard(){
  let proy='';
  if(prom!==0){proy=[1,3,6,12].map(k=>`<div class="list-item"><span>Proyección a ${k} mes${k>1?'es':''}</span><b class="${saldo+prom*k<0?'err':'al-dia'}">${fmt(saldo+prom*k)}</b></div>`).join('');}
  $('#ct-dashboard').innerHTML=`
- <h2>🏠 Panel de control</h2>
- <div class="grid mini">
+ <div class="row between"> <div class="row between"><h2>🏠 Panel de control</h2><button class="btn pri" data-act="exp-excel">📊 Descargar Excel</button></div><button class="btn pri" data-act="exp-excel">📊 Descargar Excel</button></div> <div class="grid mini">
   <div class="card kpi ${totalDeuda>0?'warn':'ok'}"><div class="lbl">Deudas activas</div><div class="val">${fmt(totalDeuda)}</div><div class="mut">${activas.length} deudas · cuota mes ${fmt(cuotaMes)}</div></div>
   <div class="card kpi ${morosas.length?'warn':'ok'}"><div class="lbl">En mora</div><div class="val">${morosas.length}</div><div class="mut">deuda morosa ${fmt(morosas.reduce((s,d)=>s+(d.saldoTotal||0),0))}</div></div>
   <div class="card kpi"><div class="lbl">Ingresos del mes</div><div class="val">${fmt(ingMes)}</div></div>
@@ -635,7 +634,7 @@ function renderAjustes(){
  <div class="card"><h3>📱 Instalar app</h3><p class="mut">En el celular: usa el menú del navegador → "Agregar a pantalla de inicio" o el banner de instalación. En iPhone: Compartir → Agregar a inicio.</p><button class="btn pri" data-act="install">📲 Instalar ahora</button></div>
  <div class="card"><h3>💾 Respaldos cifrados</h3><p class="mut">El respaldo se cifra con AES-256 usando la contraseña que elijas (formato compatible con tu bóveda).</p>
  <div class="row"><button class="btn pri" data-act="exp-cif">⬇️ Exportar respaldo cifrado</button><button class="btn" data-act="imp-cif">⬆️ Importar respaldo cifrado</button></div>
- <div class="row" style="margin-top:8px"><button class="btn soft" data-act="exp-json">Exportar JSON simple</button><button class="btn soft" data-act="imp-json">Importar JSON</button></div></div>
+ <div class="row" style="margin-top:8px"><button class="btn pri" data-act="exp-excel">📊 Descargar consolidado Excel</button></div> <div class="row" style="margin-top:8px"><button class="btn soft" data-act="exp-json">Exportar JSON simple</button><button class="btn soft" data-act="imp-json">Importar JSON</button></div></div>
  <div class="card"><h3>☁️ Sincronización Firebase (PC ↔ celular)</h3>
  <p class="mut">Pega aquí la configuración de tu proyecto Firebase (consola → Configuración del proyecto → Tus apps → SDK). Luego habilita Authentication (correo/contraseña) y Firestore.</p>
  <textarea id="fb-cfg" placeholder='{"apiKey":"...","authDomain":"...","projectId":"...","storageBucket":"...","messagingSenderId":"...","appId":"..."}'>${esc(db.fb.config||'')}</textarea>
@@ -766,6 +765,68 @@ function revisarRecordatorios(){
  sessionStorage.setItem('nv',JSON.stringify(vistas));
 }
 
+/* ============================== EXPORTAR EXCEL ============================== */
+function cargarXLSX(){
+ return new Promise((res,rej)=>{
+  if(window.XLSX)return res();
+  const s=document.createElement('script');
+  s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+  s.onload=()=>res();
+  s.onerror=()=>rej(new Error('sin-cdn'));
+  document.head.appendChild(s);
+ });
+}
+async function exportarExcel(){
+ toast('⏳ Generando Excel…');
+ try{await cargarXLSX();}catch(e){toast('❌ Necesitas conexión a internet para generar el Excel');return;}
+ const X=XLSX, wb=X.utils.book_new(), hoy=today(), mes=hoy.slice(0,7);
+ const acNom=id=>{const a=db.acreedores.find(x=>x.id===id);return a?a.nombre:'';};
+ const act=db.deudas.filter(d=>!d.archivada&&d.estado!=='pagada');
+ X.utils.book_append_sheet(wb,X.utils.json_to_sheet([
+  {Concepto:'Deudas activas (saldo)',Valor:act.reduce((s,d)=>s+(d.saldoTotal??d.montoTotal),0)},
+  {Concepto:'Deudas en mora',Valor:act.filter(d=>d.estado==='morosa').length},
+  {Concepto:'Ingresos del mes',Valor:db.ingresos.filter(i=>mkey(i.fecha)===mes).reduce((s,i)=>s+i.monto,0)},
+  {Concepto:'Gastos del mes',Valor:db.gastos.filter(g=>mkey(g.fecha)===mes).reduce((s,g)=>s+g.monto,0)},
+  {Concepto:'Pagos de deudas del mes',Valor:db.pagos.filter(p=>mkey(p.fecha)===mes).reduce((s,p)=>s+p.monto,0)},
+  {Concepto:'Balance acumulado',Valor:balanceActual()},
+  {Concepto:'Fecha de emisión',Valor:hoy}
+ ]),'Resumen');
+ X.utils.book_append_sheet(wb,X.utils.json_to_sheet(db.deudas.map(d=>({
+  Nombre:d.nombre,Estado:d.estado,Responsable:d.persona,Tipo:d.tipoDeuda,Acreedor:acNom(d.acreedorId),
+  'Monto total':d.montoTotal,'Saldo deuda':d.saldoTotal??d.montoTotal,'Facturado mes':d.montoFacturadoMes,
+  'Pago mínimo':minPago(d),'Abonos ciclo':abonosCiclo(d),'Saldo pago mínimo':cicloRestante(d),
+  'Saldo total facturado':saldoFacturado(d),Vencimiento:d.sinVencimiento?'Sin vencimiento':d.vencimiento,
+  'Días mora':diasMora(d)??'',Archivada:d.archivada?'Sí':'No',Notas:d.notas||''
+ }))),'Deudas');
+ X.utils.book_append_sheet(wb,X.utils.json_to_sheet(db.pagos.map(p=>({
+  Fecha:p.fecha,Deuda:p.deuda,Responsable:p.persona||'',Monto:p.monto,Tipo:p.tipo,Archivado:p.archivado?'Sí':'No'
+ }))),'Pagos');
+ X.utils.book_append_sheet(wb,X.utils.json_to_sheet(db.cuentas.map(c=>({
+  Titular:c.persona,Banco:c.banco,Tipo:c.tipo,'N° cuenta':c.numero,Moneda:c.moneda,Saldo:c.saldo??'',Estado:c.estado,Nombre:c.nombre||'',Archivada:c.archivada?'Sí':'No'
+ }))),'Cuentas');
+ X.utils.book_append_sheet(wb,X.utils.json_to_sheet(db.tarjetas.map(t=>({
+  Titular:t.persona,Entidad:t.entidad,Tipo:t.tipo,Formato:t.formato,'Número':t.numero,Vence:t.venc||'',Archivada:t.archivada?'Sí':'No'
+ }))),'Tarjetas');
+ X.utils.book_append_sheet(wb,X.utils.json_to_sheet(db.acreedores.map(a=>({
+  Nombre:a.nombre,Tipo:a.tipo,Nota:a.nota||''
+ }))),'Acreedores');
+ X.utils.book_append_sheet(wb,X.utils.json_to_sheet(db.ingresos.map(i=>({
+  Fecha:i.fecha,Persona:i.persona,Descripcion:i.descripcion||'',Monto:i.monto
+ }))),'Ingresos');
+ X.utils.book_append_sheet(wb,X.utils.json_to_sheet(db.gastos.map(g=>({
+  Fecha:g.fecha,Persona:g.persona,Categoria:g.categoria,Descripcion:g.descripcion||'',Monto:g.monto
+ }))),'Gastos');
+ X.utils.book_append_sheet(wb,X.utils.json_to_sheet(db.presupuestos.map(p=>{
+  const g=gastoCatMes(p.categoria,mes);
+  return {Categoria:p.categoria,'Límite mensual':p.limite,'Gastado mes':g,'% uso':p.limite>0?Math.round(g/p.limite*100):0};
+ }))),'Presupuesto');
+ X.utils.book_append_sheet(wb,X.utils.json_to_sheet(db.metas.map(m=>({
+  Nombre:m.nombre,Objetivo:m.objetivo,Ahorrado:m.ahorrado||0,'% avance':m.objetivo>0?Math.round((m.ahorrado||0)/m.objetivo*100):0,
+  'Aporte mensual':m.aporteMensual||0,'Aporte automático':m.autoAporte?'Sí':'No',Archivada:m.archivada?'Sí':'No'
+ }))),'Metas');
+ X.writeFile(wb,'Billetera_Consolidado_'+hoy+'.xlsx');
+ toast('⬇️ Excel descargado');
+}
 /* ============================== ACCIONES GLOBALES ============================== */
 document.addEventListener('click',e=>{
  const b=e.target.closest('[data-act]');if(!b)return;
@@ -842,6 +903,7 @@ document.addEventListener('click',e=>{
       const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:new Uint8Array(obj.iv)},key,new Uint8Array(obj.data));
       db=JSON.parse(dec(pt));localStorage.setItem(LS,JSON.stringify(db));evaluarDeudas();closeModal();render();toast('✅ Respaldo importado');
     }catch(err){toast('❌ Contraseña incorrecta o archivo inválido');}};};inpF.click();break;}
+  case 'exp-excel':exportarExcel();break;
   case 'exp-json':descargar('billetera_'+today()+'.json',JSON.stringify(db));break;
   case 'imp-json':{const inpF=document.createElement('input');inpF.type='file';inpF.accept='.json';inpF.onchange=async()=>{
     db=JSON.parse(await inpF.files[0].text());localStorage.setItem(LS,JSON.stringify(db));evaluarDeudas();render();toast('✅ Importado');};inpF.click();break;}
