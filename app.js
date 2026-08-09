@@ -172,7 +172,7 @@ function evaluarDeudas(){
  for(const d of db.deudas){
   if(d.estado==='pagada'||d.sinVencimiento||!d.vencimiento)continue;
   const vencido=d.vencimiento<today();
-  if(vencido&&(d.abonosCiclo||0)<minPago(d)&&d.estado!=='morosa'){d.estado='morosa';cambio=true;}
+  if(vencido&&  if(vencido&&abonosCiclo(d)<minPago(d)&&d.estado!=='morosa'){d.estado='morosa';cambio=true;}(d.abonosCiclo||0)<minPago(d)&&d.estado!=='morosa'){d.estado='morosa';cambio=true;}
   else if(!vencido&&d.estado==='morosa'){d.estado='vigente';cambio=true;}
  }
  if(cambio)save();
@@ -192,12 +192,9 @@ function registrarPago(id,fecha,monto){
  d.saldoTotal=Math.max(0,(d.saldoTotal??d.montoTotal)-monto);
  if(tipo==='ABONO'){
   if(d.sinVencimiento)d.abonadoTotal=(d.abonadoTotal||0)+monto;
-  else{
-   d.abonosCiclo=(d.abonosCiclo||0)+monto;
-   d.estado=(d.vencimiento&&d.vencimiento<today()&&d.abonosCiclo<minPago(d))?'morosa':'vigente';
-  }
+  else d.estado=(d.vencimiento&&d.vencimiento<today()&&abonosCiclo(d)<minPago(d))?'morosa':'vigente';
  }else{
-  d.estado='pagada'; d.fechaPago=fecha; d.abonosCiclo=0;
+  d.estado='pagada'; d.fechaPago=fecha;
  }
  save(); render();
  tipo==='ABONO'?toast('🧾 Abono registrado'):toast('✅ Pago registrado: '+tipo);
@@ -344,8 +341,9 @@ function openPagoModal(id){
   <div class="card" style="background:#f8fafc">
    <div class="list-item"><span>Monto facturado del mes</span><b>${fmt(d.montoFacturadoMes)}</b></div>
    <div class="list-item"><span>Pago mínimo</span><b>${fmt(min)}</b></div>
-   <div class="list-item"><span>Abonado este ciclo</span><b>${fmt(d.sinVencimiento?(d.abonadoTotal||0):(d.abonosCiclo||0))}</b></div>
-   <div class="list-item"><span>Saldo pendiente del ciclo</span><b>${cicloRestante(d)<=0?'<span class="al-dia">Cuenta al Día ✅</span>':fmt(cicloRestante(d))}</b></div>
+   <div class="list-item"><span>Abonado este ciclo</span><b>${fmt(abonosCiclo(d))}</b></div>
+   <div class="list-item"><span>Saldo pago mínimo</span><b>${cicloRestante(d)<=0?'<span class="al-dia">Cuenta al Día ✅</span>':fmt(cicloRestante(d))}</b></div>
+   <div class="list-item"><span>Saldo total facturado</span><b>${saldoFacturado(d)<=0?'<span class="al-dia">Cuenta al Día ✅</span>':fmt(saldoFacturado(d))}</b></div>
   </div>
   <form id="frm_pago">
    <div class="row2">${inp('p_fecha','Fecha del pago',today(),'date')}${inp('p_monto','Monto pagado ($)','','number','required min="1"')}</div>
@@ -372,7 +370,8 @@ function renderDeudas(){
     <span>🧾 Facturado del mes: <b>${fmt(d.montoFacturadoMes)}</b></span>
     <span>⬇️ Pago mínimo: <b>${d.tienePagoMinimo?fmt(d.pagoMinimo):fmt(minPago(d))+(d.tienePagoMinimo?'':' (= facturado)')}</b></span>
     <span>📅 Vencimiento: <b>${d.sinVencimiento?'Sin vencimiento':dstr(d.vencimiento)}</b></span>
-    <span>👛 Saldo pendiente: ${d.estado==='pagada'?'<span class="al-dia">Pagada ✅</span>':rest<=0?'<span class="al-dia">Cuenta al Día ✅</span>':'<b class="err">'+fmt(rest)+'</b>'}</span>
+    <    <span>👛 Saldo pago mínimo: ${d.estado==='pagada'?'<span class="al-dia">Pagada ✅</span>':rest<=0?'<span class="al-dia">Cuenta al Día ✅</span>':'<b class="err">'+fmt(rest)+'</b>'}</span>
+    <span>🧮 Saldo total facturado: ${d.estado==='pagada'?'<span class="al-dia">Pagada ✅</span>':saldoFacturado(d)<=0?'<span class="al-dia">Cuenta al Día ✅</span>':'<b>'+fmt(saldoFacturado(d))+'</b>'}</span>span>👛 Saldo pendiente: ${d.estado==='pagada'?'<span class="al-dia">Pagada ✅</span>':rest<=0?'<span class="al-dia">Cuenta al Día ✅</span>':'<b class="err">'+fmt(rest)+'</b>'}</span>
    </div>
    <div class="acts">
     ${d.estado!=='pagada'&&!d.archivada?`<button class="btn pri mini" data-act="pago" data-id="${d.id}">💰 Pago</button>`:''}
