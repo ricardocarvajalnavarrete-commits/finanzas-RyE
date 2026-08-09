@@ -217,7 +217,7 @@ function renderNav(){$('#mainnav').innerHTML=VIEWS.map(([v,i,l])=>`<button class
 function go(v){curView=v;renderNav();$$('.view').forEach(s=>s.classList.toggle('hidden',s.id!=='view-'+v));render();window.scrollTo({top:0});}
 function render(){
  evaluarDeudas();
-    return `<div class="list-item"><span><b>${esc(a.nombre)}</b> <span class="mut">(${n} deuda${n===1?'':'s'})</span>${(a.nota||'')?`<div class="mut" style="font-size:.82em;margin-top:2px">📝 ${esc(a.nota)}</div>`:''}</span>
+ ({dashboard:renderDashboard,deudas:renderDeudas,pagos:renderPagos,acreedores:renderAcreedores,cuentas:renderCuentas,
    presupuesto:renderPresupuesto,gastos:renderGastos,metas:renderMetas,historico:renderHistorico,archivo:renderArchivo,ajustes:renderAjustes}[curView]||(()=>{}))();
 }
 
@@ -450,6 +450,27 @@ function tarjetaModal(id){
   if(id)Object.assign(t,v);else db.tarjetas.push(Object.assign({id:uid(),archivada:false},v));save();closeModal();render();toast('💾 Tarjeta guardada');};
 }
 
+const mask=n=>{const s=String(n||'').replace(/\s/g,'');return s.length>4?'•••• •••• '+s.slice(-4):s;};
+function renderCuentas(){
+ const cs=db.cuentas.filter(c=>!c.archivada), ts=db.tarjetas.filter(t=>!t.archivada);
+ $('#ct-cuentas').innerHTML=`
+ <div class="row between"><h2>🏛️ Cuentas y tarjetas</h2><span class="row">
+  <button class="btn soft" data-act="toggle-nums">${showNums?'🙈 Ocultar números':'👁 Mostrar números'}</button>
+  <button class="btn pri" data-act="new-cuenta">➕ Cuenta</button>
+  <button class="btn pri" data-act="new-tarjeta">➕ Tarjeta</button></span></div>
+ <div class="card"><h3>Cuentas bancarias (${cs.length})</h3><div class="tblwrap"><table>
+ <tr><th>Titular</th><th>Banco</th><th>Tipo</th><th>Número</th><th>Moneda</th><th>Estado</th><th></th></tr>
+ ${cs.map(c=>`<tr><td>${esc(c.persona)}</td><td>${esc(c.banco)}</td><td>${esc(c.tipo)}${c.nombre?'<br><span class="mut">'+esc(c.nombre)+'</span>':''}</td>
+  <td class="mask">${showNums?esc(c.numero):mask(c.numero)}</td><td>${c.moneda}</td><td>${c.estado}</td>
+  <td><button class="btn mini" data-act="edit-cuenta" data-id="${c.id}">✏️</button><button class="btn mini" data-act="arch-cuenta" data-id="${c.id}">📦</button><button class="btn warn mini" data-act="del-cuenta" data-id="${c.id}">🗑️</button></td></tr>`).join('')}
+ </table></div></div>
+ <div class="card"><h3>Tarjetas (${ts.length})</h3><div class="tblwrap"><table>
+ <tr><th>Titular</th><th>Entidad</th><th>Tipo</th><th>Formato</th><th>Número</th><th>Vence</th><th></th></tr>
+ ${ts.map(t=>`<tr><td>${esc(t.persona)}</td><td>${esc(t.entidad)}</td><td>${esc(t.tipo)}</td><td>${t.formato==='Física'?'💳':'🌐'} ${t.formato}</td>
+  <td class="mask">${showNums?esc(t.numero):mask(t.numero)}</td><td>${t.venc||'—'}</td>
+  <td><button class="btn mini" data-act="edit-tarjeta" data-id="${t.id}">✏️</button><button class="btn mini" data-act="arch-tarjeta" data-id="${t.id}">📦</button><button class="btn warn mini" data-act="del-tarjeta" data-id="${t.id}">🗑️</button></td></tr>`).join('')}
+ </table></div><p class="mut">🔐 Por seguridad, ingresa números completos y CVV solo con la app protegida con contraseña, y usa respaldos cifrados.</p></div>`;
+}
 /* ============================== PRESUPUESTO ============================== */
 function gastoCatMes(cat,m){return db.gastos.filter(g=>g.categoria===cat&&mkey(g.fecha)===m).reduce((s,g)=>s+g.monto,0);}
 function renderPresupuesto(){
