@@ -149,9 +149,17 @@ function init(){db=load()||seed();localStorage.setItem(LS,JSON.stringify(db));ev
 const debtById=id=>db.deudas.find(d=>d.id===id);
 const acById=id=>db.acreedores.find(a=>a.id===id);
 const minPago=d=>(d.tienePagoMinimo&&Number(d.pagoMinimo)>0)?Number(d.pagoMinimo):(Number(d.montoFacturadoMes)||0);
+function abonosCiclo(d){
+ if(d.sinVencimiento||!d.vencimiento)return d.abonadoTotal||0;
+ const desde=addMonth(d.vencimiento,-1);
+ return db.pagos.filter(p=>p.deudaId===d.id&&p.fecha>=desde).reduce((s,p)=>s+(Number(p.monto)||0),0);
+}
 function cicloRestante(d){
  if(d.sinVencimiento)return Math.max(0,(Number(d.montoTotal)||0)-(d.abonadoTotal||0));
- return Math.max(0,minPago(d)-(d.abonosCiclo||0));
+ return Math.max(0,minPago(d)-abonosCiclo(d));
+}
+function saldoFacturado(d){
+ return Math.max(0,(Number(d.montoFacturadoMes)||0)-abonosCiclo(d));
 }
 function diasMora(d){return (d.estado==='morosa'&&d.vencimiento)?Math.max(0,days(d.vencimiento,today())):null;}
 function moraChip(d){
