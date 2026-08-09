@@ -1,4 +1,4 @@
-console.log('👛 Billetera v2 — parche pagos + firebase');
+console.log('👛 Billetera v3 — archivo completo consolidado');
 'use strict';
 /* ============================== UTILIDADES ============================== */
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
@@ -14,13 +14,10 @@ const inp=(id,label,val='',type='text',extra='')=>`<label class="fld"><span>${la
 const sel=(id,label,opts,val='')=>`<label class="fld"><span>${label}</span><select id="${id}">${opts.map(([v,l])=>`<option value="${esc(v)}" ${String(v)===String(val)?'selected':''}>${esc(l)}</option>`).join('')}</select></label>`;
 const fmtK=n=>n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?Math.round(n/1e3)+'k':Math.round(n);
 
-/* ============================== DATOS BASE (desde tus archivos) ============================== */
-/* NOTA DE SEGURIDAD: los números completos de tarjetas y CVV NO se incluyen aquí.
-   Solo últimos 4 dígitos, porque GitHub Pages puede ser público.
-   Ingresa los datos completos dentro de la app y protégela con contraseña + respaldo cifrado. */
+/* ============================== DATOS BASE ============================== */
 function seed(){
  const A=(id,tipo,nombre)=>({id,tipo,nombre});
- const D=o=>Object.assign({id:uid(),abonosCiclo:0,pagadoHistorico:0,archivada:false,notas:''},o);
+ const D=o=>Object.assign({id:uid(),pagadoHistorico:0,archivada:false,notas:''},o);
  const C=(persona,banco,tipo,numero,moneda='CLP',estado='Activa',nombre='')=>({id:uid(),persona,banco,tipo,numero,moneda,estado,nombre,saldo:null,archivada:false});
  const T=(persona,entidad,tipo,formato,numero,venc='')=>({id:uid(),persona,entidad,tipo,formato,numero,venc,archivada:false});
  return {
@@ -45,7 +42,7 @@ function seed(){
    D({nombre:'Visa Smart+ BancoEstado',tipoDeuda:'Tarjeta de Crédito',conTipo:'financiera',acreedorId:'a2',persona:'Elías',montoTotal:628222,saldoTotal:0,montoFacturadoMes:628222,tienePagoMinimo:false,pagoMinimo:null,vencimiento:'2026-05-12',sinVencimiento:false,estado:'pagada',fechaPago:'2026-05-10'}),
    D({nombre:'La Polar Visa',tipoDeuda:'Tarjeta de Crédito',conTipo:'empresa',acreedorId:'a3',persona:'Ricardo',montoTotal:1121059,saldoTotal:1121059,montoFacturadoMes:283797,tienePagoMinimo:true,pagoMinimo:283797,vencimiento:'2026-05-04',sinVencimiento:false,estado:'vigente'}),
    D({nombre:'ABC Visa',tipoDeuda:'Tarjeta de Crédito',conTipo:'empresa',acreedorId:'a4',persona:'Ricardo',montoTotal:3176780,saldoTotal:3176780,montoFacturadoMes:374520,tienePagoMinimo:true,pagoMinimo:374520,vencimiento:'2026-05-01',sinVencimiento:false,estado:'vigente'}),
-   D({nombre:'Líder BCI',tipoDeuda:'Tarjeta de Crédito',conTipo:'empresa',acreedorId:'a5',persona:'Ricardo',montoTotal:4268613,saldoTotal:4268613,montoFacturadoMes:465654,tienePagoMinimo:true,pagoMinimo:327010,vencimiento:'2026-05-09',sinVencimiento:false,estado:'vigente',abonosCiclo:88745}),
+   D({nombre:'Líder BCI',tipoDeuda:'Tarjeta de Crédito',conTipo:'empresa',acreedorId:'a5',persona:'Ricardo',montoTotal:4268613,saldoTotal:4268613,montoFacturadoMes:465654,tienePagoMinimo:true,pagoMinimo:327010,vencimiento:'2026-05-09',sinVencimiento:false,estado:'vigente'}),
    D({nombre:'SB Pay',tipoDeuda:'Tarjeta de Crédito',conTipo:'empresa',acreedorId:'a6',persona:'Ricardo',montoTotal:1712037,saldoTotal:1712037,montoFacturadoMes:95231,tienePagoMinimo:true,pagoMinimo:95231,vencimiento:'2026-06-06',sinVencimiento:false,estado:'vigente'}),
    D({nombre:'Unipay Elías',tipoDeuda:'Tarjeta de Crédito',conTipo:'empresa',acreedorId:'a7',persona:'Elías',montoTotal:35553,saldoTotal:35553,montoFacturadoMes:35553,tienePagoMinimo:false,pagoMinimo:null,vencimiento:null,sinVencimiento:true,estado:'morosa'}),
    D({nombre:'Unipay Ricardo',tipoDeuda:'Tarjeta de Crédito',conTipo:'empresa',acreedorId:'a7',persona:'Ricardo',montoTotal:82119,saldoTotal:82119,montoFacturadoMes:82119,tienePagoMinimo:false,pagoMinimo:null,vencimiento:null,sinVencimiento:true,estado:'morosa'}),
@@ -172,7 +169,7 @@ function evaluarDeudas(){
  for(const d of db.deudas){
   if(d.estado==='pagada'||d.sinVencimiento||!d.vencimiento)continue;
   const vencido=d.vencimiento<today();
-  if(vencido&&  if(vencido&&abonosCiclo(d)<minPago(d)&&d.estado!=='morosa'){d.estado='morosa';cambio=true;}(d.abonosCiclo||0)<minPago(d)&&d.estado!=='morosa'){d.estado='morosa';cambio=true;}
+  if(vencido&&abonosCiclo(d)<minPago(d)&&d.estado!=='morosa'){d.estado='morosa';cambio=true;}
   else if(!vencido&&d.estado==='morosa'){d.estado='vigente';cambio=true;}
  }
  if(cambio)save();
@@ -191,8 +188,8 @@ function registrarPago(id,fecha,monto){
  d.pagadoHistorico=(d.pagadoHistorico||0)+monto;
  d.saldoTotal=Math.max(0,(d.saldoTotal??d.montoTotal)-monto);
  if(tipo==='ABONO'){
-  if(d.sinVencimiento)d.abonadoTotal=(d.abonadoTotal||0)+monto;
-  else d.estado=(d.vencimiento&&d.vencimiento<today()&&abonosCiclo(d)<minPago(d))?'morosa':'vigente';
+  if(d.sinVencimiento){d.abonadoTotal=(d.abonadoTotal||0)+monto;}
+  else{d.estado=(d.vencimiento&&d.vencimiento<today()&&abonosCiclo(d)<minPago(d))?'morosa':'vigente';}
  }else{
   d.estado='pagada'; d.fechaPago=fecha;
  }
@@ -251,7 +248,7 @@ function renderDashboard(){
  for(const d of morosas.sort((a,b)=>diasMora(b)-diasMora(a)))alertas.push(`<div class="alert-line r">🔴 <b>${esc(d.nombre)}</b> en mora: ${diasMora(d)} días (${d.vencimiento?'venció '+dstr(d.vencimiento):'sin vencimiento'})</div>`);
  for(const d of activas.filter(d=>d.estado==='vigente'&&d.vencimiento)){const dd=days(today(),d.vencimiento);if(dd>=0&&dd<=(db.ajustes.diasAviso||5))alertas.push(`<div class="alert-line y">🟡 <b>${esc(d.nombre)}</b> vence en ${dd} día${dd===1?'':'s'} (${dstr(d.vencimiento)})</div>`);}
  const h=histData();
- for(const p of db.presupuestos){const gast=h[m]?db.gastos.filter(g=>mkey(g.fecha)===m&&g.categoria===p.categoria).reduce((s,g)=>s+g.monto,0):0;if(p.limite>0&&gast>p.limite)alertas.push(`<div class="alert-line r">💸 Presupuesto excedido en <b>${esc(p.categoria)}</b>: ${fmt(gast)} de ${fmt(p.limite)}</div>`);}
+ for(const p of db.presupuestos){const gast=db.gastos.filter(g=>mkey(g.fecha)===m&&g.categoria===p.categoria).reduce((s,g)=>s+g.monto,0);if(p.limite>0&&gast>p.limite)alertas.push(`<div class="alert-line r">💸 Presupuesto excedido en <b>${esc(p.categoria)}</b>: ${fmt(gast)} de ${fmt(p.limite)}</div>`);}
  if(!alertas.length)alertas.push('<div class="alert-line b">✨ Sin alertas pendientes. ¡Buen trabajo!</div>');
  const consejos=[];
  const ingresoRef=ingMes||db.ingresos.slice(-3).reduce((s,i)=>s+i.monto,0)/Math.max(1,new Set(db.ingresos.map(i=>mkey(i.fecha))).size);
@@ -326,9 +323,9 @@ function bindDeudaForm(orig){
   if(!v.nombre)return toast('⚠️ Escribe un nombre para la deuda');
   if(v.acreedorId==='__new')return toast('⚠️ Selecciona un acreedor válido');
   const quierePagar=v.estado==='pagada'&&orig.estado!=='pagada';
-  if(!quierePagar)v.estado=v.estado; else v.estado=orig.estado||'vigente';
+  if(quierePagar)v.estado=orig.estado||'vigente';
   let id=orig.id;
-  if(id){Object.assign(debtById(id),v);}else{id=uid();db.deudas.push(Object.assign({id,abonosCiclo:0,abonadoTotal:0,pagadoHistorico:0,archivada:false},v));}
+  if(id){Object.assign(debtById(id),v);}else{id=uid();db.deudas.push(Object.assign({id,pagadoHistorico:0,abonadoTotal:0,archivada:false},v));}
   save();closeModal();render();toast('💾 Deuda guardada');
   if(quierePagar)openPagoModal(id);
  };
@@ -370,8 +367,8 @@ function renderDeudas(){
     <span>🧾 Facturado del mes: <b>${fmt(d.montoFacturadoMes)}</b></span>
     <span>⬇️ Pago mínimo: <b>${d.tienePagoMinimo?fmt(d.pagoMinimo):fmt(minPago(d))+(d.tienePagoMinimo?'':' (= facturado)')}</b></span>
     <span>📅 Vencimiento: <b>${d.sinVencimiento?'Sin vencimiento':dstr(d.vencimiento)}</b></span>
-    <    <span>👛 Saldo pago mínimo: ${d.estado==='pagada'?'<span class="al-dia">Pagada ✅</span>':rest<=0?'<span class="al-dia">Cuenta al Día ✅</span>':'<b class="err">'+fmt(rest)+'</b>'}</span>
-    <span>🧮 Saldo total facturado: ${d.estado==='pagada'?'<span class="al-dia">Pagada ✅</span>':saldoFacturado(d)<=0?'<span class="al-dia">Cuenta al Día ✅</span>':'<b>'+fmt(saldoFacturado(d))+'</b>'}</span>span>👛 Saldo pendiente: ${d.estado==='pagada'?'<span class="al-dia">Pagada ✅</span>':rest<=0?'<span class="al-dia">Cuenta al Día ✅</span>':'<b class="err">'+fmt(rest)+'</b>'}</span>
+    <span>👛 Saldo pago mínimo: ${d.estado==='pagada'?'<span class="al-dia">Pagada ✅</span>':rest<=0?'<span class="al-dia">Cuenta al Día ✅</span>':'<b class="err">'+fmt(rest)+'</b>'}</span>
+    <span>🧮 Saldo total facturado: ${d.estado==='pagada'?'<span class="al-dia">Pagada ✅</span>':saldoFacturado(d)<=0?'<span class="al-dia">Cuenta al Día ✅</span>':'<b>'+fmt(saldoFacturado(d))+'</b>'}</span>
    </div>
    <div class="acts">
     ${d.estado!=='pagada'&&!d.archivada?`<button class="btn pri mini" data-act="pago" data-id="${d.id}">💰 Pago</button>`:''}
@@ -456,7 +453,6 @@ function tarjetaModal(id){
  $('#frm_t').onsubmit=e=>{e.preventDefault();const v={persona:$('#t_per').value,entidad:$('#t_ent').value,tipo:$('#t_tipo').value,formato:$('#t_fmt').value,numero:$('#t_num').value,venc:$('#t_venc').value};
   if(id)Object.assign(t,v);else db.tarjetas.push(Object.assign({id:uid(),archivada:false},v));save();closeModal();render();toast('💾 Tarjeta guardada');};
 }
-
 const mask=n=>{const s=String(n||'').replace(/\s/g,'');return s.length>4?'•••• •••• '+s.slice(-4):s;};
 function renderCuentas(){
  const cs=db.cuentas.filter(c=>!c.archivada), ts=db.tarjetas.filter(t=>!t.archivada);
@@ -478,6 +474,7 @@ function renderCuentas(){
   <td><button class="btn mini" data-act="edit-tarjeta" data-id="${t.id}">✏️</button><button class="btn mini" data-act="arch-tarjeta" data-id="${t.id}">📦</button><button class="btn warn mini" data-act="del-tarjeta" data-id="${t.id}">🗑️</button></td></tr>`).join('')}
  </table></div><p class="mut">🔐 Por seguridad, ingresa números completos y CVV solo con la app protegida con contraseña, y usa respaldos cifrados.</p></div>`;
 }
+
 /* ============================== PRESUPUESTO ============================== */
 function gastoCatMes(cat,m){return db.gastos.filter(g=>g.categoria===cat&&mkey(g.fecha)===m).reduce((s,g)=>s+g.monto,0);}
 function renderPresupuesto(){
@@ -601,7 +598,7 @@ function drawChart(){
 
 /* ============================== ARCHIVO ============================== */
 function renderArchivo(){
- const sec=(titulo,items,rest,dels)=>`<div class="card"><h3>${titulo} (${items.length})</h3>${items.map(i=>i.html).join('')||'<p class="mut">Vacío.</p>'}</div>`;
+ const sec=(titulo,items)=>`<div class="card"><h3>${titulo} (${items.length})</h3>${items.map(i=>i.html).join('')||'<p class="mut">Vacío.</p>'}</div>`;
  const it=(txt,act,id)=>`<div class="list-item"><span>${txt}</span><span class="row"><button class="btn mini" data-act="${act}" data-id="${id}">♻️ Desarchivar</button><button class="btn warn mini" data-act="${act.replace('rest','del')}" data-id="${id}">🗑️ Eliminar</button></span></div>`;
  $('#ct-archivo').innerHTML=`<h2>📦 Archivo</h2><p class="mut">Elementos archivados: puedes restaurarlos o eliminarlos definitivamente.</p>
  ${sec('💳 Deudas archivadas',db.deudas.filter(d=>d.archivada).map(d=>({html:it(`${esc(d.nombre)} · ${fmt(d.saldoTotal??0)}`,'rest-deuda',d.id)})))}
@@ -642,6 +639,7 @@ function renderAjustes(){
  <div class="card"><h3>🧹 Datos</h3><button class="btn warn" data-act="reset">⚠️ Borrar todos los datos y reiniciar</button></div>`;
  const fa=$('#fb-act');if(fa)fa.onchange=e=>{db.fb.activo=e.target.checked;save();toast(db.fb.activo?'☁️ Sincronización activada':'Sincronización desactivada');};
 }
+
 /* ============================== CRIPTOGRAFÍA ============================== */
 const enc=s=>new TextEncoder().encode(s), dec=b=>new TextDecoder().decode(b);
 async function pbkdf2Key(pass,ssalt,use){
@@ -684,6 +682,7 @@ async function bioUnlock(){
   userVerification:'required',timeout:60000}});
  return !!cred;
 }
+
 /* ============================== FIREBASE ============================== */
 const fb={app:null,auth:null,dbfs:null,user:null,loaded:false};
 function parseFB(txt){
@@ -768,40 +767,34 @@ document.addEventListener('click',e=>{
  const find=(arr,i)=>arr.find(x=>x.id===i);
  const archToggle=(arr,i,frase)=>{
   const x=find(arr,i); if(!x)return;
-  // Detecta el nombre correcto del campo según el tipo de registro
   const clave=('archivado' in x)?'archivado':'archivada';
   x[clave]=!x[clave];
-  // Limpia el campo equivocado si quedó de un intento anterior
   if(clave==='archivado')delete x.archivada; else delete x.archivado;
   save();render();
   toast(x[clave]?`📦 ${frase} archivado`:`♻️ ${frase} restaurado`);
-};
+ };
  switch(act){
   case 'close-modal':closeModal();break;
   case 'nav':go(id);break;
-  /* deudas */
   case 'new-deuda':openDeudaModal();break;
   case 'edit-deuda':openDeudaModal(id);break;
   case 'pago':openPagoModal(id);break;
-  case 'cuota':{const d=debtById(id);const nd={...d,id:uid(),estado:'vigente',fechaPago:null,abonosCiclo:0,abonadoTotal:0,archivada:false,vencimiento:d.vencimiento?addMonth(d.vencimiento):null};
+  case 'cuota':{const d=debtById(id);const nd={...d,id:uid(),estado:'vigente',fechaPago:null,abonadoTotal:0,archivada:false,vencimiento:d.vencimiento?addMonth(d.vencimiento):null};
     nd.nombre=d.nombre.replace(/ — .*$/,'')+' — '+new Date().toLocaleDateString('es-CL',{month:'long'});db.deudas.push(nd);save();render();toast('🔁 Nueva cuota creada');break;}
   case 'arch-deuda':archToggle(db.deudas,id,'Deuda');break;
   case 'rest-deuda':archToggle(db.deudas,id,'Deuda');break;
   case 'del-deuda':confirmDlg('🗑️ Eliminar deuda',`¿Eliminar definitivamente "${esc(debtById(id)?.nombre)}"? Esta acción no se puede deshacer.`,()=>{db.deudas=db.deudas.filter(d=>d.id!==id);save();render();toast('🗑️ Deuda eliminada');});break;
   case 'filter-deuda':deudaFilter=id;renderDeudas();break;
   case 'toggle-arch-deudas':deudaVerArch=!deudaVerArch;renderDeudas();break;
-  /* pagos */
   case 'toggle-arch-pagos':pagoVerArch=!pagoVerArch;renderPagos();break;
   case 'arch-pago':archToggle(db.pagos,id,'Pago');break;
   case 'rest-pago':archToggle(db.pagos,id,'Pago');break;
   case 'del-pago':confirmDlg('🗑️ Eliminar pago','¿Eliminar definitivamente este registro de pago?',()=>{db.pagos=db.pagos.filter(p=>p.id!==id);save();render();toast('🗑️ Pago eliminado');});break;
-  /* acreedores */
   case 'new-ac':acModal(id);break;
   case 'edit-ac':acModal(null,id);break;
   case 'del-ac':{const usado=db.deudas.some(d=>d.acreedorId===id);
     if(usado)toast('⚠️ No se puede eliminar: hay deudas asociadas a este acreedor.');
     else confirmDlg('🗑️ Eliminar acreedor','¿Eliminar este acreedor?',()=>{db.acreedores=db.acreedores.filter(a=>a.id!==id);save();render();toast('🗑️ Eliminado');});break;}
-  /* cuentas y tarjetas */
   case 'toggle-nums':showNums=!showNums;renderCuentas();break;
   case 'new-cuenta':cuentaModal();break; case 'edit-cuenta':cuentaModal(id);break;
   case 'arch-cuenta':archToggle(db.cuentas,id,'Cuenta');break; case 'rest-cuenta':archToggle(db.cuentas,id,'Cuenta');break;
@@ -809,28 +802,24 @@ document.addEventListener('click',e=>{
   case 'new-tarjeta':tarjetaModal();break; case 'edit-tarjeta':tarjetaModal(id);break;
   case 'arch-tarjeta':archToggle(db.tarjetas,id,'Tarjeta');break; case 'rest-tarjeta':archToggle(db.tarjetas,id,'Tarjeta');break;
   case 'del-tarjeta':confirmDlg('🗑️ Eliminar tarjeta','¿Eliminar definitivamente?',()=>{db.tarjetas=db.tarjetas.filter(t=>t.id!==id);save();render();});break;
-  /* presupuesto */
   case 'new-pres':presModal();break;
   case 'edit-pres':presModal(id);break;
   case 'del-pres':db.presupuestos=db.presupuestos.filter(p=>p.categoria!==id);save();render();break;
-  /* gastos */
   case 'new-ing':ingModal();break;
   case 'del-ing':db.ingresos=db.ingresos.filter(i=>i.id!==id);save();render();break;
   case 'new-gasto':gastoModal();break;
   case 'del-gasto':db.gastos=db.gastos.filter(g=>g.id!==id);save();render();break;
-  /* metas */
   case 'new-meta':metaModal();break; case 'edit-meta':metaModal(id);break;
   case 'arch-meta':archToggle(db.metas,id,'Meta');break; case 'rest-meta':archToggle(db.metas,id,'Meta');break;
   case 'aporte-meta':openModal('💰 Aportar a la meta',`<form id="frm_ap">${inp('ap_mon','Monto ($)','','number')}<div class="frm-btns"><button class="btn pri">Aportar</button></div></form>`);
    $('#frm_ap').onsubmit=e=>{e.preventDefault();const mt=find(db.metas,id);mt.ahorrado=(mt.ahorrado||0)+(+$('#ap_mon').value||0);save();closeModal();render();toast('💰 Aporte registrado');};break;
-  /* ajustes */
   case 'save-personas':$$('.fld-inp').forEach(inpEl=>{db.personas[inpEl.dataset.i]=inpEl.value.trim()||db.personas[inpEl.dataset.i];});save();render();toast('💾 Nombres guardados');break;
   case 'set-pass':passModal('🔑 Establecer contraseña','Crear');break;
   case 'chg-pass':passModal('🔑 Cambiar contraseña','Cambiar');break;
   case 'rm-pass':confirmDlg('Quitar contraseña','¿Seguro? La app quedará sin protección.',()=>{db.auth=null;save();render();toast('Contraseña eliminada');});break;
-   case 'bio-on':(async()=>{if(!db.auth)return toast('⚠️ Primero establece una contraseña');if(!(await bioAvailable()))return toast('❌ El navegador no ofrece huella/Face ID');try{await bioEnroll();toast('✅ Desbloqueo biométrico activado');renderAjustes();}catch(e){toast('❌ Operación cancelada');}})();break;
+  case 'bio-on':(async()=>{if(!db.auth)return toast('⚠️ Primero establece una contraseña');if(!(await bioAvailable()))return toast('❌ El navegador no ofrece huella/Face ID');try{await bioEnroll();toast('✅ Desbloqueo biométrico activado');renderAjustes();}catch(e){toast('❌ Operación cancelada');}})();break;
   case 'bio-off':localStorage.removeItem('billetera_bio');renderAjustes();toast('Desbloqueo biométrico desactivado');break;
-    case 'notif-perm':if('Notification'in window)Notification.requestPermission().then(()=>{render();toast('🔔 Permiso: '+Notification.permission);});else toast('No soportado');break;
+  case 'notif-perm':if('Notification'in window)Notification.requestPermission().then(()=>{render();toast('🔔 Permiso: '+Notification.permission);});else toast('No soportado');break;
   case 'save-aviso':db.ajustes.diasAviso=+$('#aviso').value||5;save();toast('💾 Guardado');break;
   case 'install':installApp();break;
   case 'exp-cif':passModal('🔐 Contraseña para cifrar el respaldo','Cifrar y descargar',async pass=>{
@@ -884,7 +873,6 @@ function showBioButton(){
  b.onclick=async()=>{try{if(await bioUnlock())doUnlock();}catch(e){$('#lock-err').textContent='Huella no reconocida. Usa tu contraseña.';}};
  $('.lock-card').insertBefore(b,$('#lock-btn'));
 }
-// Continuación del código de arranque
 document.querySelector('#btn-lock').onclick=()=>{if(!db.auth)return toast('Sin contraseña activa (actívala en Ajustes)');unlocked=false;$('#app').classList.add('hidden');$('#lock-screen').classList.remove('hidden');};
 $('#lock-btn').onclick=tryUnlock;
 $('#lock-pass').addEventListener('keydown',e=>{if(e.key==='Enter')tryUnlock();});
