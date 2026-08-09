@@ -712,7 +712,16 @@ document.addEventListener('click',e=>{
  const b=e.target.closest('[data-act]');if(!b)return;
  const {act,id}=b.dataset;
  const find=(arr,i)=>arr.find(x=>x.id===i);
- const archToggle=(arr,i,frase)=>{const x=find(arr,i);x.archivada=!x.archivada;save();render();toast(x.archivada?'📦 '+frase+' archivada':'♻️ '+frase+' restaurada');};
+ const archToggle=(arr,i,frase)=>{
+  const x=find(arr,i); if(!x)return;
+  // Detecta el nombre correcto del campo según el tipo de registro
+  const clave=('archivado' in x)?'archivado':'archivada';
+  x[clave]=!x[clave];
+  // Limpia el campo equivocado si quedó de un intento anterior
+  if(clave==='archivado')delete x.archivada; else delete x.archivado;
+  save();render();
+  toast(x[clave]?`📦 ${frase} archivado`:`♻️ ${frase} restaurado`);
+};
  switch(act){
   case 'close-modal':closeModal();break;
   case 'nav':go(id);break;
