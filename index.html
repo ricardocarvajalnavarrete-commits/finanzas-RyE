@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Billetera Familiar — Ricardo & Elías</title>
+<meta name="theme-color" content="#0e7c66">
+<meta name="description" content="Gestión financiera familiar: deudas, cuentas, presupuesto, metas y pagos.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ===== PANTALLA BLOQUEO ===== -->
+<div id="lock-screen" class="lock hidden">
+  <div class="lock-card">
+    <div class="lock-ico">👛</div>
+    <h2>Billetera Familiar</h2>
+    <p>Ingresa tu contraseña para continuar</p>
+    <input type="password" id="lock-pass" placeholder="Contraseña" autocomplete="current-password">
+    <button class="btn pri" id="lock-btn">🔓 Desbloquear</button>
+    <p id="lock-err" class="err"></p>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+<header>
+  <div class="brand">👛 <b>Billetera Familiar</b><small>Ricardo & Elías</small></div>
+  <div class="hdr-r">
+    <span id="sync-chip" class="chip hidden"></span>
+    <button class="btn icon" id="btn-lock" title="Bloquear">🔒</button>
+  </div>
+</header>
+
+<nav id="mainnav"></nav>
+
+<main>
+  <section class="view" id="view-dashboard"><div id="ct-dashboard"></div></section>
+  <section class="view hidden" id="view-deudas"><div id="ct-deudas"></div></section>
+  <section class="view hidden" id="view-pagos"><div id="ct-pagos"></div></section>
+  <section class="view hidden" id="view-acreedores"><div id="ct-acreedores"></div></section>
+  <section class="view hidden" id="view-cuentas"><div id="ct-cuentas"></div></section>
+  <section class="view hidden" id="view-presupuesto"><div id="ct-presupuesto"></div></section>
+  <section class="view hidden" id="view-gastos"><div id="ct-gastos"></div></section>
+  <section class="view hidden" id="view-metas"><div id="ct-metas"></div></section>
+  <section class="view hidden" id="view-historico"><div id="ct-historico"></div></section>
+  <section class="view hidden" id="view-archivo"><div id="ct-archivo"></div></section>
+  <section class="view hidden" id="view-ajustes"><div id="ct-ajustes"></div></section>
+</main>
+</div>
+
+<div id="install-banner" class="install-banner hidden">
+  <span>📱 Instala la app en tu dispositivo</span>
+  <button class="btn pri" id="install-btn">Instalar</button>
+  <button class="btn icon" id="install-x">✕</button>
+</div>
+
+<div id="modal-root"></div>
+<div id="toast" class="toast hidden"></div>
+
+<script src="app.js" defer></script>
+<script>
+if('serviceWorker' in navigator && location.protocol.startsWith('http')){
+  window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
+}
+</script>
+</body>
+</html>
