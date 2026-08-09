@@ -464,8 +464,8 @@ function renderCuentas(){
  const cs=db.cuentas.filter(c=>!c.archivada), ts=db.tarjetas.filter(t=>!t.archivada);
  $('#ct-cuentas').innerHTML=`
 <div class="row between"><h2>🏛️ Cuentas y tarjetas</h2><span class="row">
-  <a href="https://ricardocarvajalnavarrete-commits.github.io/boveda-bancaria/" target="_blank" rel="noopener" class="btn pri">🔐 Cuentas y Tarjetas</a>  <button class="btn soft" data-act="toggle-nums">${showNums?'🙈 Ocultar números':'👁 Mostrar números'}</button>
-  <button class="btn pri" data-act="new-cuenta">➕ Cuenta</button>
+<a href="https://ricardocarvajalnavarrete-commits.github.io/boveda-bancaria/" target="_blank" rel="noopener" class="btn pri">🔐 Cuentas y Tarjetas</a>
+<button class="btn soft" data-act="exp-boveda-pdf">📄 Bóveda a PDF protegido</button>  <button class="btn pri" data-act="new-cuenta">➕ Cuenta</button>
   <button class="btn pri" data-act="new-tarjeta">➕ Tarjeta</button></span></div>
  <div class="card"><h3>Cuentas bancarias (${cs.length})</h3><div class="tblwrap"><table>
  <tr><th>Titular</th><th>Banco</th><th>Tipo</th><th>Número</th><th>Moneda</th><th>Estado</th><th></th></tr>
@@ -828,6 +828,88 @@ async function exportarExcel(){
  X.writeFile(wb,'Billetera_Consolidado_'+hoy+'.xlsx');
  toast('⬇️ Excel descargado');
 }
+/* ============================== BÓVEDA → PDF PROTEGIDO ============================== */
+function cargarLibPDF(){
+ return new Promise((res,rej)=>{
+  if(window.jspdf&&window.jspdf.jsPDF)return res();
+  const s1=document.createElement('script');
+  s1.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+  s1.onload=()=>{const s2=document.createElement('script');
+   s2.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.0/jspdf.plugin.autotable.min.js';
+   s2.onload=res;s2.onerror=rej;document.head.appendChild(s2);};
+  s1.onerror=rej;document.head.appendChild(s1);
+ });
+}
+function limpiarKeys(obj){const o={};for(const k in obj)o[k.trim()]=obj[k];return o;}
+function normalizarBoveda(d){
+ let arr;
+ if(Array.isArray(d))arr=d;
+ else if(d.registros)arr=d.registros;
+ else if(d.items)arr=d.items;
+ else if(d.cuentas||d.tarjetas)arr=[...(d.cuentas||[]),...(d.tarjetas||[])];
+ else arr=[];
+ return arr.map(r=>({
+  titular:r.titular||r.persona||'',tipo:r.tipo||'',formato:r.formato||'',
+  banco:r.banco||r.entidad||'',numero:r.numero||'',marca:r.marca||'',
+  vence:r.vence||r.vencimiento||'',ccv:r.ccv||r.cvv||r.cv||'',
+  vinculada:r.vinculada||r['vinculada a']||'',notas:r.notas||r.alias||''
+ }));
+}
+async function exportBovedaPDF(){
+ toast('⏳ Buscando bóveda cifrada…');
+ let obj=null;
+ try{
+  const r=await fetch('https://ricardocarvajalnavarrete-commits.github.io/boveda-bancaria/boveda_cifrada.json',{cache:'no-store'});
+  if(r.ok)obj=limpiarKeys(await r.json());
+ }catch(e){}
+ if(!obj){
+  obj=await new Promise(res=>{
+   const i=document.createElement('input');i.type='file';i.accept='.json';
+   i.onchange=async()=>{try{res(limpiarKeys(JSON.parse(await i.files[0].text())));}catch(e){res(null);}};
+   i.oncancel=()=>res(null);i.click();
+  });
+ }
+ if(!obj||!obj.data)return toast('❌ No se encontró la bóveda cifrada');
+ openModal('🔓 Bóveda → PDF protegido',`
+  <form id="frm_bv">
+   ${inp('bv_pw','Contraseña de la bóveda','','password','required')}
+   <label class="chk"><input type="checkbox" id="bv_same" checked> Usar la misma contraseña para abrir el PDF</label>
+   <div id="bv_otra" style="display:none">${inp('bv_pw2','Contraseña del PDF','','password')}</div>
+   <p class="mut">El PDF incluirá cuentas y tarjetas con números y CVV visibles, y pedirá contraseña al abrirlo.</p>
+   <div class="frm-btns"><button class="btn pri">📄 Generar PDF</button><button type="button" class="btn" data-act="close-modal">Cancelar</button></div>
+  </form>`);
+ $('#bv_same').onchange=e=>{$('#bv_otra').style.display=e.target.checked?'none':'block';};
+ $('#frm_bv').onsubmit=async e=>{
+  e.preventDefault();
+  const pass=$('#bv_pw').value;
+  const pdfPass=$('#bv_same').checked?pass:($('#bv_pw2').value||pass);
+  try{
+   const key=await pbkdf2Key(pass,new Uint8Array(obj.salt),['decrypt']);
+   const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:new Uint8Array(obj.iv)},key,new Uint8Array(obj.data));
+   await generarPDFBoveda(normalizarBoveda(JSON.parse(dec(pt))),pdfPass);
+   closeModal();toast('⬇️ PDF protegido descargado');
+  }catch(err){toast('❌ Contraseña incorrecta o bóveda inválida');}
+ };
+}
+async function generarPDFBoveda(regs,pass){
+ await cargarLibPDF();
+ const {jsPDF}=window.jspdf;
+ const doc=new jsPDF({orientation:'landscape',encryption:{userPassword:pass,ownerPassword:pass,userPermissions:['print']}});
+ const cuentas=regs.filter(r=>(r.tipo||'').toLowerCase().includes('cuenta'));
+ const tarjetas=regs.filter(r=>!(r.tipo||'').toLowerCase().includes('cuenta'));
+ doc.setFontSize(16);doc.text('Bóveda Bancaria — Ricardo & Elías',14,16);
+ doc.setFontSize(9);doc.setTextColor(200,0,0);
+ doc.text('DOCUMENTO CONFIDENCIAL — Protegido con contraseña — Generado '+today(),14,22);
+ doc.setTextColor(0,0,0);
+ doc.autoTable({startY:28,head:[['Titular','Tipo','Banco','Número','Notas']],
+  body:cuentas.map(r=>[r.titular,r.tipo,r.banco,r.numero,r.notas]),
+  styles:{fontSize:8},headStyles:{fillColor:[14,124,102]}});
+ doc.addPage();
+ doc.autoTable({startY:16,head:[['Titular','Tipo','Formato','Banco','Número','Vence','CVV','Vinculada a','Notas']],
+  body:tarjetas.map(r=>[r.titular,r.tipo,r.formato,r.banco,r.numero,r.vence,r.ccv,r.vinculada,r.notas]),
+  styles:{fontSize:8},headStyles:{fillColor:[220,38,38]}});
+ doc.save('Boveda_CONFIDENCIAL_'+today()+'.pdf');
+}
 /* ============================== ACCIONES GLOBALES ============================== */
 document.addEventListener('click',e=>{
  const b=e.target.closest('[data-act]');if(!b)return;
@@ -903,7 +985,8 @@ document.addEventListener('click',e=>{
       const key=await pbkdf2Key($('#imp_pw').value,new Uint8Array(obj.salt),['decrypt']);
       const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:new Uint8Array(obj.iv)},key,new Uint8Array(obj.data));
       db=JSON.parse(dec(pt));localStorage.setItem(LS,JSON.stringify(db));evaluarDeudas();closeModal();render();toast('✅ Respaldo importado');
-    }catch(err){toast('❌ Contraseña incorrecta o archivo inválido');}};};inpF.click();break;}
+    }catch(err){toast('❌ Contraseña incorrecta o archivo inválido');}};};inpF.click();break;};
+    case 'exp-boveda-pdf':exportBovedaPDF();break;
   case 'exp-excel':exportarExcel();break;
   case 'exp-json':descargar('billetera_'+today()+'.json',JSON.stringify(db));break;
   case 'imp-json':{const inpF=document.createElement('input');inpF.type='file';inpF.accept='.json';inpF.onchange=async()=>{
