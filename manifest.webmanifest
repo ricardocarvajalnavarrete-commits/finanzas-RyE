@@ -1,0 +1,16 @@
+{
+  "name": "Billetera Familiar — Ricardo & Elías",
+  "short_name": "Billetera",
+  "description": "Gestión financiera familiar: deudas, cuentas, presupuesto, metas y pagos.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f1f5f8",
+  "theme_color": "#0e7c66",
+  "lang": "es",
+  "icons": [
+    { "src": "icon.svg", "sizes": "192x192", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icon.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
