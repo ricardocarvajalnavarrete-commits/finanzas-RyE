@@ -929,8 +929,8 @@ async function generarPDFBoveda(regs,pass){
   body:cuentas.map(r=>[r.titular,r.tipo,r.banco,r.numero,r.notas]),
   styles:{fontSize:8},headStyles:{fillColor:[14,124,102]}});
  doc.addPage();
- doc.autoTable({startY:16,head:[['Titular','Tipo','Formato','Banco','Número','Vence','CVV','Vinculada a','Notas']],
-  body:tarjetas.map(r=>[r.titular,r.tipo,r.formato,r.banco,r.numero,r.vence,r.ccv,r.vinculada,r.notas]),
+  doc.autoTable({startY:16,head:[['Titular','Tipo','Formato','Banco','Número','Vence','CVV','Notas']],
+  body:tarjetas.map(r=>[r.titular,r.tipo,r.formato,r.banco,r.numero,r.vence,r.ccv,r.notas]),
   styles:{fontSize:8},headStyles:{fillColor:[220,38,38]}});
  doc.save('Boveda_CONFIDENCIAL_'+today()+'.pdf');
 }
