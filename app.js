@@ -842,18 +842,35 @@ function cargarLibPDF(){
  });
 }
 function limpiarKeys(obj){const o={};for(const k in obj)o[k.trim()]=obj[k];return o;}
+function normKey(k){return String(k).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'');}
+function getCampo(r,sins){
+ const keys=Object.keys(r||{});
+ for(const n of sins){for(const k of keys){if(normKey(k)===n)return r[k];}}
+ for(const n of sins){for(const k of keys){if(normKey(k).includes(n))return r[k];}}
+ return '';
+}
 function normalizarBoveda(d){
- let arr;
+ let arr=[];
  if(Array.isArray(d))arr=d;
- else if(d.registros)arr=d.registros;
- else if(d.items)arr=d.items;
- else if(d.cuentas||d.tarjetas)arr=[...(d.cuentas||[]),...(d.tarjetas||[])];
- else arr=[];
- return arr.map(r=>({
-  titular:r.titular||r.persona||'',tipo:r.tipo||'',formato:r.formato||'',
-  banco:r.banco||r.entidad||'',numero:r.numero||'',marca:r.marca||'',
-  vence:r.vence||r.vencimiento||'',ccv:r.ccv||r.cvv||r.cv||'',
-  vinculada:r.vinculada||r['vinculada a']||'',notas:r.notas||r.alias||''
+ else if(d&&typeof d==='object'){
+  if(Array.isArray(d.registros))arr=d.registros;
+  else if(Array.isArray(d.items))arr=d.items;
+  else if(Array.isArray(d.records))arr=d.records;
+  else if(Array.isArray(d.cuentas)||Array.isArray(d.tarjetas))arr=[...(d.cuentas||[]),...(d.tarjetas||[])];
+  else{for(const k in d){if(Array.isArray(d[k])&&d[k].length&&typeof d[k][0]==='object'){arr=d[k];break;}}}
+ }
+ if(arr.length)console.log('🔑 CLAVES BÓVEDA:',Object.keys(arr[0]));
+ return arr.filter(r=>r&&typeof r==='object').map(r=>({
+  titular:String(getCampo(r,['titular','persona','holder','owner','dueno','nombre'])||''),
+  tipo:String(getCampo(r,['tipo','type','clase'])||''),
+  formato:String(getCampo(r,['formato','format'])||''),
+  banco:String(getCampo(r,['banco','bank','entidad','entity','institucion'])||''),
+  numero:String(getCampo(r,['numero','number','num','tarjeta','card'])||''),
+  marca:String(getCampo(r,['marca','brand'])||''),
+  vence:String(getCampo(r,['vence','vencimiento','expiry','venc'])||''),
+  ccv:String(getCampo(r,['ccv','cvv','cvc','cv'])||''),
+  vinculada:String(getCampo(r,['vinculada','linked','vinculo'])||''),
+  notas:String(getCampo(r,['notas','nota','notes','alias','uso'])||'')
  }));
 }
 async function descifrarBoveda(obj,pass){
