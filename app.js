@@ -856,27 +856,29 @@ function normalizarBoveda(d){
   vinculada:r.vinculada||r['vinculada a']||'',notas:r.notas||r.alias||''
  }));
 }
-async function exportBovedaPDF(){
- toast('⏳ Buscando bóveda cifrada…');
- let obj=null;
- try{
-  const r=await fetch('https://ricardocarvajalnavarrete-commits.github.io/boveda-bancaria/boveda_cifrada.json',{cache:'no-store'});
-  if(r.ok)obj=limpiarKeys(await r.json());
- }catch(e){}
- if(!obj){
-  obj=await new Promise(res=>{
-   const i=document.createElement('input');i.type='file';i.accept='.json';
-   i.onchange=async()=>{try{res(limpiarKeys(JSON.parse(await i.files[0].text())));}catch(e){res(null);}};
-   i.oncancel=()=>res(null);i.click();
-  });
+async function descifrarBoveda(obj,pass){
+ const combos=[];
+ [100000,120000,60000,250000,310000,600000,150000,50000,20000,10000,1000].forEach(it=>combos.push({it,hash:'SHA-256'}));
+ [100000,120000].forEach(it=>combos.push({it,hash:'SHA-1'}));
+ for(const c of combos){
+  try{
+   const km=await crypto.subtle.importKey('raw',new TextEncoder().encode(pass),'PBKDF2',false,['deriveKey']);
+   const key=await crypto.subtle.deriveKey({name:'PBKDF2',salt:new Uint8Array(obj.salt),iterations:c.it,hash:c.hash},km,{name:'AES-GCM',length:256},false,['decrypt']);
+   const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:new Uint8Array(obj.iv)},key,new Uint8Array(obj.data));
+   return JSON.parse(new TextDecoder().decode(pt));
+  }catch(e){}
  }
- if(!obj||!obj.data)return toast('❌ No se encontró la bóveda cifrada');
+ return null;
+}
+async function exportBovedaPDF(){
  openModal('🔓 Bóveda → PDF protegido',`
   <form id="frm_bv">
+   <label class="fld"><span>Archivo boveda_cifrada.json actual (opcional)</span>
+   <input type="file" id="bv_file" accept=".json"></label>
+   <p class="mut">Si no subes un archivo, se usará la bóveda publicada en GitHub.</p>
    ${inp('bv_pw','Contraseña de la bóveda','','password','required')}
    <label class="chk"><input type="checkbox" id="bv_same" checked> Usar la misma contraseña para abrir el PDF</label>
    <div id="bv_otra" style="display:none">${inp('bv_pw2','Contraseña del PDF','','password')}</div>
-   <p class="mut">El PDF incluirá cuentas y tarjetas con números y CVV visibles, y pedirá contraseña al abrirlo.</p>
    <div class="frm-btns"><button class="btn pri">📄 Generar PDF</button><button type="button" class="btn" data-act="close-modal">Cancelar</button></div>
   </form>`);
  $('#bv_same').onchange=e=>{$('#bv_otra').style.display=e.target.checked?'none':'block';};
@@ -884,12 +886,16 @@ async function exportBovedaPDF(){
   e.preventDefault();
   const pass=$('#bv_pw').value;
   const pdfPass=$('#bv_same').checked?pass:($('#bv_pw2').value||pass);
-  try{
-   const key=await pbkdf2Key(pass,new Uint8Array(obj.salt),['decrypt']);
-   const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:new Uint8Array(obj.iv)},key,new Uint8Array(obj.data));
-   await generarPDFBoveda(normalizarBoveda(JSON.parse(dec(pt))),pdfPass);
-   closeModal();toast('⬇️ PDF protegido descargado');
-  }catch(err){toast('❌ Contraseña incorrecta o bóveda inválida');}
+  let obj=null;
+  const f=$('#bv_file').files[0];
+  if(f){try{obj=limpiarKeys(JSON.parse(await f.text()));}catch(err){return toast('❌ Archivo json inválido');}}
+  else{try{const r=await fetch('https://ricardocarvajalnavarrete-commits.github.io/boveda-bancaria/boveda_cifrada.json',{cache:'no-store'});if(r.ok)obj=limpiarKeys(await r.json());}catch(err){}}
+  if(!obj||!obj.data||!obj.salt||!obj.iv)return toast('❌ No se encontró la bóveda cifrada');
+  toast('⏳ Descifrando bóveda…');
+  const datos=await descifrarBoveda(obj,pass);
+  if(!datos)return toast('❌ La contraseña no coincide con este archivo. Sube el boveda_cifrada.json más reciente o revisa la clave.');
+  await generarPDFBoveda(normalizarBoveda(datos),pdfPass);
+  closeModal();toast('⬇️ PDF protegido descargado');
  };
 }
 async function generarPDFBoveda(regs,pass){
