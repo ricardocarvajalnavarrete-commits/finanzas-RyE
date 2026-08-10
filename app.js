@@ -1,4 +1,4 @@
-console.log('👛 Billetera v4 — archivo completo verificado');
+console.log('👛 Billetera v3 — archivo completo consolidado');
 'use strict';
 /* ============================== UTILIDADES ============================== */
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
@@ -463,11 +463,10 @@ const mask=n=>{const s=String(n||'').replace(/\s/g,'');return s.length>4?'••
 function renderCuentas(){
  const cs=db.cuentas.filter(c=>!c.archivada), ts=db.tarjetas.filter(t=>!t.archivada);
  $('#ct-cuentas').innerHTML=`
- <div class="row between"><h2>🏛️ Cuentas y tarjetas</h2><span class="row">
- <a href="https://ricardocarvajalnavarrete-commits.github.io/boveda-bancaria/" target="_blank" rel="noopener" class="btn pri">🔐 Cuentas y Tarjetas</a>
- <button class="btn soft" data-act="exp-boveda-pdf">📄 Bóveda a PDF protegido</button>
- <button class="btn pri" data-act="new-cuenta">➕ Cuenta</button>
- <button class="btn pri" data-act="new-tarjeta">➕ Tarjeta</button></span></div>
+<div class="row between"><h2>🏛️ Cuentas y tarjetas</h2><span class="row">
+<a href="https://ricardocarvajalnavarrete-commits.github.io/boveda-bancaria/" target="_blank" rel="noopener" class="btn pri">🔐 Cuentas y Tarjetas</a>
+<button class="btn soft" data-act="exp-boveda-pdf">📄 Bóveda a PDF protegido</button>  <button class="btn pri" data-act="new-cuenta">➕ Cuenta</button>
+  <button class="btn pri" data-act="new-tarjeta">➕ Tarjeta</button></span></div>
  <div class="card"><h3>Cuentas bancarias (${cs.length})</h3><div class="tblwrap"><table>
  <tr><th>Titular</th><th>Banco</th><th>Tipo</th><th>Número</th><th>Moneda</th><th>Estado</th><th></th></tr>
  ${cs.map(c=>`<tr><td>${esc(c.persona)}</td><td>${esc(c.banco)}</td><td>${esc(c.tipo)}${c.nombre?'<br><span class="mut">'+esc(c.nombre)+'</span>':''}</td>
@@ -636,8 +635,7 @@ function renderAjustes(){
  <div class="card"><h3>📱 Instalar app</h3><p class="mut">En el celular: usa el menú del navegador → "Agregar a pantalla de inicio" o el banner de instalación. En iPhone: Compartir → Agregar a inicio.</p><button class="btn pri" data-act="install">📲 Instalar ahora</button></div>
  <div class="card"><h3>💾 Respaldos cifrados</h3><p class="mut">El respaldo se cifra con AES-256 usando la contraseña que elijas (formato compatible con tu bóveda).</p>
  <div class="row"><button class="btn pri" data-act="exp-cif">⬇️ Exportar respaldo cifrado</button><button class="btn" data-act="imp-cif">⬆️ Importar respaldo cifrado</button></div>
- <div class="row" style="margin-top:8px"><button class="btn pri" data-act="exp-excel">📊 Descargar consolidado Excel</button></div>
- <div class="row" style="margin-top:8px"><button class="btn soft" data-act="exp-json">Exportar JSON simple</button><button class="btn soft" data-act="imp-json">Importar JSON</button></div></div>
+ <div class="row" style="margin-top:8px"><button class="btn pri" data-act="exp-excel">📊 Descargar consolidado Excel</button></div> <div class="row" style="margin-top:8px"><button class="btn soft" data-act="exp-json">Exportar JSON simple</button><button class="btn soft" data-act="imp-json">Importar JSON</button></div></div>
  <div class="card"><h3>☁️ Sincronización Firebase (PC ↔ celular)</h3>
  <p class="mut">Pega aquí la configuración de tu proyecto Firebase (consola → Configuración del proyecto → Tus apps → SDK). Luego habilita Authentication (correo/contraseña) y Firestore.</p>
  <textarea id="fb-cfg" placeholder='{"apiKey":"...","authDomain":"...","projectId":"...","storageBucket":"...","messagingSenderId":"...","appId":"..."}'>${esc(db.fb.config||'')}</textarea>
@@ -689,89 +687,6 @@ async function bioUnlock(){
   allowCredentials:[{type:'public-key',id:b64uBuf(id)}],
   userVerification:'required',timeout:60000}});
  return !!cred;
-}
-
-/* ============================== BÓVEDA → PDF PROTEGIDO ============================== */
-function cargarLibPDF(){
- return new Promise((res,rej)=>{
-  if(window.jspdf&&window.jspdf.jsPDF)return res();
-  const s1=document.createElement('script');
-  s1.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
-  s1.onload=()=>{const s2=document.createElement('script');
-   s2.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.0/jspdf.plugin.autotable.min.js';
-   s2.onload=res;s2.onerror=rej;document.head.appendChild(s2);};
-  s1.onerror=rej;document.head.appendChild(s1);
- });
-}
-function limpiarKeys(obj){const o={};for(const k in obj)o[k.trim()]=obj[k];return o;}
-function normalizarBoveda(d){
- let arr;
- if(Array.isArray(d))arr=d;
- else if(d.registros)arr=d.registros;
- else if(d.items)arr=d.items;
- else if(d.cuentas||d.tarjetas)arr=[...(d.cuentas||[]),...(d.tarjetas||[])];
- else arr=[];
- return arr.map(r=>({
-  titular:r.titular||r.persona||'',tipo:r.tipo||'',formato:r.formato||'',
-  banco:r.banco||r.entidad||'',numero:r.numero||'',marca:r.marca||'',
-  vence:r.vence||r.vencimiento||'',ccv:r.ccv||r.cvv||r.cv||'',
-  vinculada:r.vinculada||r['vinculada a']||'',notas:r.notas||r.alias||''
- }));
-}
-async function exportBovedaPDF(){
- toast('⏳ Buscando bóveda cifrada…');
- let obj=null;
- try{
-  const r=await fetch('https://ricardocarvajalnavarrete-commits.github.io/boveda-bancaria/boveda_cifrada.json',{cache:'no-store'});
-  if(r.ok)obj=limpiarKeys(await r.json());
- }catch(e){}
- if(!obj){
-  obj=await new Promise(res=>{
-   const i=document.createElement('input');i.type='file';i.accept='.json';
-   i.onchange=async()=>{try{res(limpiarKeys(JSON.parse(await i.files[0].text())));}catch(e){res(null);}};
-   i.oncancel=()=>res(null);i.click();
-  });
- }
- if(!obj||!obj.data)return toast('❌ No se encontró la bóveda cifrada');
- openModal('🔓 Bóveda → PDF protegido',`
-  <form id="frm_bv">
-   ${inp('bv_pw','Contraseña de la bóveda','','password','required')}
-   <label class="chk"><input type="checkbox" id="bv_same" checked> Usar la misma contraseña para abrir el PDF</label>
-   <div id="bv_otra" style="display:none">${inp('bv_pw2','Contraseña del PDF','','password')}</div>
-   <p class="mut">El PDF incluirá cuentas y tarjetas con números y CVV visibles, y pedirá contraseña al abrirlo.</p>
-   <div class="frm-btns"><button class="btn pri">📄 Generar PDF</button><button type="button" class="btn" data-act="close-modal">Cancelar</button></div>
-  </form>`);
- $('#bv_same').onchange=e=>{$('#bv_otra').style.display=e.target.checked?'none':'block';};
- $('#frm_bv').onsubmit=async e=>{
-  e.preventDefault();
-  const pass=$('#bv_pw').value;
-  const pdfPass=$('#bv_same').checked?pass:($('#bv_pw2').value||pass);
-  try{
-   const key=await pbkdf2Key(pass,new Uint8Array(obj.salt),['decrypt']);
-   const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:new Uint8Array(obj.iv)},key,new Uint8Array(obj.data));
-   await generarPDFBoveda(normalizarBoveda(JSON.parse(dec(pt))),pdfPass);
-   closeModal();toast('⬇️ PDF protegido descargado');
-  }catch(err){toast('❌ Contraseña incorrecta o bóveda inválida');}
- };
-}
-async function generarPDFBoveda(regs,pass){
- await cargarLibPDF();
- const {jsPDF}=window.jspdf;
- const doc=new jsPDF({orientation:'landscape',encryption:{userPassword:pass,ownerPassword:pass,userPermissions:['print']}});
- const cuentas=regs.filter(r=>(r.tipo||'').toLowerCase().includes('cuenta'));
- const tarjetas=regs.filter(r=>!(r.tipo||'').toLowerCase().includes('cuenta'));
- doc.setFontSize(16);doc.text('Bóveda Bancaria — Ricardo & Elías',14,16);
- doc.setFontSize(9);doc.setTextColor(200,0,0);
- doc.text('DOCUMENTO CONFIDENCIAL — Protegido con contraseña — Generado '+today(),14,22);
- doc.setTextColor(0,0,0);
- doc.autoTable({startY:28,head:[['Titular','Tipo','Banco','Número','Notas']],
-  body:cuentas.map(r=>[r.titular,r.tipo,r.banco,r.numero,r.notas]),
-  styles:{fontSize:8},headStyles:{fillColor:[14,124,102]}});
- doc.addPage();
- doc.autoTable({startY:16,head:[['Titular','Tipo','Formato','Banco','Número','Vence','CVV','Vinculada a','Notas']],
-  body:tarjetas.map(r=>[r.titular,r.tipo,r.formato,r.banco,r.numero,r.vence,r.ccv,r.vinculada,r.notas]),
-  styles:{fontSize:8},headStyles:{fillColor:[220,38,38]}});
- doc.save('Boveda_CONFIDENCIAL_'+today()+'.pdf');
 }
 
 /* ============================== FIREBASE ============================== */
@@ -913,7 +828,88 @@ async function exportarExcel(){
  X.writeFile(wb,'Billetera_Consolidado_'+hoy+'.xlsx');
  toast('⬇️ Excel descargado');
 }
-
+/* ============================== BÓVEDA → PDF PROTEGIDO ============================== */
+function cargarLibPDF(){
+ return new Promise((res,rej)=>{
+  if(window.jspdf&&window.jspdf.jsPDF)return res();
+  const s1=document.createElement('script');
+  s1.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+  s1.onload=()=>{const s2=document.createElement('script');
+   s2.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.0/jspdf.plugin.autotable.min.js';
+   s2.onload=res;s2.onerror=rej;document.head.appendChild(s2);};
+  s1.onerror=rej;document.head.appendChild(s1);
+ });
+}
+function limpiarKeys(obj){const o={};for(const k in obj)o[k.trim()]=obj[k];return o;}
+function normalizarBoveda(d){
+ let arr;
+ if(Array.isArray(d))arr=d;
+ else if(d.registros)arr=d.registros;
+ else if(d.items)arr=d.items;
+ else if(d.cuentas||d.tarjetas)arr=[...(d.cuentas||[]),...(d.tarjetas||[])];
+ else arr=[];
+ return arr.map(r=>({
+  titular:r.titular||r.persona||'',tipo:r.tipo||'',formato:r.formato||'',
+  banco:r.banco||r.entidad||'',numero:r.numero||'',marca:r.marca||'',
+  vence:r.vence||r.vencimiento||'',ccv:r.ccv||r.cvv||r.cv||'',
+  vinculada:r.vinculada||r['vinculada a']||'',notas:r.notas||r.alias||''
+ }));
+}
+async function exportBovedaPDF(){
+ toast('⏳ Buscando bóveda cifrada…');
+ let obj=null;
+ try{
+  const r=await fetch('https://ricardocarvajalnavarrete-commits.github.io/boveda-bancaria/boveda_cifrada.json',{cache:'no-store'});
+  if(r.ok)obj=limpiarKeys(await r.json());
+ }catch(e){}
+ if(!obj){
+  obj=await new Promise(res=>{
+   const i=document.createElement('input');i.type='file';i.accept='.json';
+   i.onchange=async()=>{try{res(limpiarKeys(JSON.parse(await i.files[0].text())));}catch(e){res(null);}};
+   i.oncancel=()=>res(null);i.click();
+  });
+ }
+ if(!obj||!obj.data)return toast('❌ No se encontró la bóveda cifrada');
+ openModal('🔓 Bóveda → PDF protegido',`
+  <form id="frm_bv">
+   ${inp('bv_pw','Contraseña de la bóveda','','password','required')}
+   <label class="chk"><input type="checkbox" id="bv_same" checked> Usar la misma contraseña para abrir el PDF</label>
+   <div id="bv_otra" style="display:none">${inp('bv_pw2','Contraseña del PDF','','password')}</div>
+   <p class="mut">El PDF incluirá cuentas y tarjetas con números y CVV visibles, y pedirá contraseña al abrirlo.</p>
+   <div class="frm-btns"><button class="btn pri">📄 Generar PDF</button><button type="button" class="btn" data-act="close-modal">Cancelar</button></div>
+  </form>`);
+ $('#bv_same').onchange=e=>{$('#bv_otra').style.display=e.target.checked?'none':'block';};
+ $('#frm_bv').onsubmit=async e=>{
+  e.preventDefault();
+  const pass=$('#bv_pw').value;
+  const pdfPass=$('#bv_same').checked?pass:($('#bv_pw2').value||pass);
+  try{
+   const key=await pbkdf2Key(pass,new Uint8Array(obj.salt),['decrypt']);
+   const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:new Uint8Array(obj.iv)},key,new Uint8Array(obj.data));
+   await generarPDFBoveda(normalizarBoveda(JSON.parse(dec(pt))),pdfPass);
+   closeModal();toast('⬇️ PDF protegido descargado');
+  }catch(err){toast('❌ Contraseña incorrecta o bóveda inválida');}
+ };
+}
+async function generarPDFBoveda(regs,pass){
+ await cargarLibPDF();
+ const {jsPDF}=window.jspdf;
+ const doc=new jsPDF({orientation:'landscape',encryption:{userPassword:pass,ownerPassword:pass,userPermissions:['print']}});
+ const cuentas=regs.filter(r=>(r.tipo||'').toLowerCase().includes('cuenta'));
+ const tarjetas=regs.filter(r=>!(r.tipo||'').toLowerCase().includes('cuenta'));
+ doc.setFontSize(16);doc.text('Bóveda Bancaria — Ricardo & Elías',14,16);
+ doc.setFontSize(9);doc.setTextColor(200,0,0);
+ doc.text('DOCUMENTO CONFIDENCIAL — Protegido con contraseña — Generado '+today(),14,22);
+ doc.setTextColor(0,0,0);
+ doc.autoTable({startY:28,head:[['Titular','Tipo','Banco','Número','Notas']],
+  body:cuentas.map(r=>[r.titular,r.tipo,r.banco,r.numero,r.notas]),
+  styles:{fontSize:8},headStyles:{fillColor:[14,124,102]}});
+ doc.addPage();
+ doc.autoTable({startY:16,head:[['Titular','Tipo','Formato','Banco','Número','Vence','CVV','Vinculada a','Notas']],
+  body:tarjetas.map(r=>[r.titular,r.tipo,r.formato,r.banco,r.numero,r.vence,r.ccv,r.vinculada,r.notas]),
+  styles:{fontSize:8},headStyles:{fillColor:[220,38,38]}});
+ doc.save('Boveda_CONFIDENCIAL_'+today()+'.pdf');
+}
 /* ============================== ACCIONES GLOBALES ============================== */
 document.addEventListener('click',e=>{
  const b=e.target.closest('[data-act]');if(!b)return;
@@ -950,15 +946,11 @@ document.addEventListener('click',e=>{
     if(usado)toast('⚠️ No se puede eliminar: hay deudas asociadas a este acreedor.');
     else confirmDlg('🗑️ Eliminar acreedor','¿Eliminar este acreedor?',()=>{db.acreedores=db.acreedores.filter(a=>a.id!==id);save();render();toast('🗑️ Eliminado');});break;}
   case 'toggle-nums':showNums=!showNums;renderCuentas();break;
-  case 'new-cuenta':cuentaModal();break;
-  case 'edit-cuenta':cuentaModal(id);break;
-  case 'arch-cuenta':archToggle(db.cuentas,id,'Cuenta');break;
-  case 'rest-cuenta':archToggle(db.cuentas,id,'Cuenta');break;
+  case 'new-cuenta':cuentaModal();break; case 'edit-cuenta':cuentaModal(id);break;
+  case 'arch-cuenta':archToggle(db.cuentas,id,'Cuenta');break; case 'rest-cuenta':archToggle(db.cuentas,id,'Cuenta');break;
   case 'del-cuenta':confirmDlg('🗑️ Eliminar cuenta','¿Eliminar definitivamente?',()=>{db.cuentas=db.cuentas.filter(c=>c.id!==id);save();render();});break;
-  case 'new-tarjeta':tarjetaModal();break;
-  case 'edit-tarjeta':tarjetaModal(id);break;
-  case 'arch-tarjeta':archToggle(db.tarjetas,id,'Tarjeta');break;
-  case 'rest-tarjeta':archToggle(db.tarjetas,id,'Tarjeta');break;
+  case 'new-tarjeta':tarjetaModal();break; case 'edit-tarjeta':tarjetaModal(id);break;
+  case 'arch-tarjeta':archToggle(db.tarjetas,id,'Tarjeta');break; case 'rest-tarjeta':archToggle(db.tarjetas,id,'Tarjeta');break;
   case 'del-tarjeta':confirmDlg('🗑️ Eliminar tarjeta','¿Eliminar definitivamente?',()=>{db.tarjetas=db.tarjetas.filter(t=>t.id!==id);save();render();});break;
   case 'new-pres':presModal();break;
   case 'edit-pres':presModal(id);break;
@@ -967,10 +959,8 @@ document.addEventListener('click',e=>{
   case 'del-ing':db.ingresos=db.ingresos.filter(i=>i.id!==id);save();render();break;
   case 'new-gasto':gastoModal();break;
   case 'del-gasto':db.gastos=db.gastos.filter(g=>g.id!==id);save();render();break;
-  case 'new-meta':metaModal();break;
-  case 'edit-meta':metaModal(id);break;
-  case 'arch-meta':archToggle(db.metas,id,'Meta');break;
-  case 'rest-meta':archToggle(db.metas,id,'Meta');break;
+  case 'new-meta':metaModal();break; case 'edit-meta':metaModal(id);break;
+  case 'arch-meta':archToggle(db.metas,id,'Meta');break; case 'rest-meta':archToggle(db.metas,id,'Meta');break;
   case 'aporte-meta':openModal('💰 Aportar a la meta',`<form id="frm_ap">${inp('ap_mon','Monto ($)','','number')}<div class="frm-btns"><button class="btn pri">Aportar</button></div></form>`);
    $('#frm_ap').onsubmit=e=>{e.preventDefault();const mt=find(db.metas,id);mt.ahorrado=(mt.ahorrado||0)+(+$('#ap_mon').value||0);save();closeModal();render();toast('💰 Aporte registrado');};break;
   case 'save-personas':$$('.fld-inp').forEach(inpEl=>{db.personas[inpEl.dataset.i]=inpEl.value.trim()||db.personas[inpEl.dataset.i];});save();render();toast('💾 Nombres guardados');break;
@@ -995,15 +985,14 @@ document.addEventListener('click',e=>{
       const key=await pbkdf2Key($('#imp_pw').value,new Uint8Array(obj.salt),['decrypt']);
       const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:new Uint8Array(obj.iv)},key,new Uint8Array(obj.data));
       db=JSON.parse(dec(pt));localStorage.setItem(LS,JSON.stringify(db));evaluarDeudas();closeModal();render();toast('✅ Respaldo importado');
-    }catch(err){toast('❌ Contraseña incorrecta o archivo inválido');}};};inpF.click();break;}
+    }catch(err){toast('❌ Contraseña incorrecta o archivo inválido');}};};inpF.click();break;};
+    case 'exp-boveda-pdf':exportBovedaPDF();break;
   case 'exp-excel':exportarExcel();break;
-  case 'exp-boveda-pdf':exportBovedaPDF();break;
   case 'exp-json':descargar('billetera_'+today()+'.json',JSON.stringify(db));break;
   case 'imp-json':{const inpF=document.createElement('input');inpF.type='file';inpF.accept='.json';inpF.onchange=async()=>{
     db=JSON.parse(await inpF.files[0].text());localStorage.setItem(LS,JSON.stringify(db));evaluarDeudas();render();toast('✅ Importado');};inpF.click();break;}
   case 'fb-save':db.fb.config=$('#fb-cfg').value.trim();save();initFB();toast('💾 Configuración guardada');break;
-  case 'fb-login':fbAuthModal(false);break;
-  case 'fb-reg':fbAuthModal(true);break;
+  case 'fb-login':fbAuthModal(false);break; case 'fb-reg':fbAuthModal(true);break;
   case 'fb-out':import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js').then(m=>m.signOut(fb.auth));break;
   case 'reset':confirmDlg('⚠️ Borrar todo','Se eliminarán TODOS los datos locales (deudas, cuentas, pagos…). ¿Continuar?',()=>{localStorage.removeItem(LS);location.reload();});break;
  }
