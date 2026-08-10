@@ -820,7 +820,8 @@ async function exportarExcel(){
  X.utils.book_append_sheet(wb,X.utils.json_to_sheet(db.presupuestos.map(p=>{
   const g=gastoCatMes(p.categoria,mes);
   return {Categoria:p.categoria,'Límite mensual':p.limite,'Gastado mes':g,'% uso':p.limite>0?Math.round(g/p.limite*100):0};
- }))),'Presupuesto');
+  })),
+  'Presupuesto');
  X.utils.book_append_sheet(wb,X.utils.json_to_sheet(db.metas.map(m=>({
   Nombre:m.nombre,Objetivo:m.objetivo,Ahorrado:m.ahorrado||0,'% avance':m.objetivo>0?Math.round((m.ahorrado||0)/m.objetivo*100):0,
   'Aporte mensual':m.aporteMensual||0,'Aporte automático':m.autoAporte?'Sí':'No',Archivada:m.archivada?'Sí':'No'
