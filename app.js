@@ -644,8 +644,8 @@ function renderAjustes(){
  <div class="card"><h3>📱 Instalar app</h3><p class="mut">En el celular: usa el menú del navegador → "Agregar a pantalla de inicio" o el banner de instalación. En iPhone: Compartir → Agregar a inicio.</p><button class="btn pri" data-act="install">📲 Instalar ahora</button></div>
  <div class="card"><h3>💾 Respaldos cifrados</h3><p class="mut">El respaldo se cifra con AES-256 usando la contraseña que elijas (formato compatible con tu bóveda).</p>
  <div class="row"><button class="btn pri" data-act="exp-cif">⬇️ Exportar respaldo cifrado</button><button class="btn" data-act="imp-cif">⬆️ Importar respaldo cifrado</button></div>
- <div class="row" style="margin-top:8px"><button class="btn pri" data-act="exp-excel">📊 Descargar consolidado Excel</button></div> <div class="row" style="margin-top:8px"><button class="btn soft" data-act="exp-json">Exportar JSON simple</button><button class="btn soft" data-act="imp-json">Importar JSON</button></div></div>
- <div class="row" style="margin-top:8px"><button class="btn pri" data-act="imp-excel">📊 Importar desde Excel</button></div>
+  <div class="row" style="margin-top:8px"><button class="btn pri" data-act="exp-excel">📊 Descargar Excel</button><button class="btn pri" data-act="imp-excel" style="margin-left:8px">📊 Importar Excel</button></div> 
+ <div class="row" style="margin-top:8px"><button class="btn soft" data-act="exp-json">Exportar JSON simple</button><button class="btn soft" data-act="imp-json">Importar JSON</button></div></div>
  <div class="card"><h3>☁️ Sincronización Firebase (PC ↔ celular)</h3>
  <p class="mut">Pega aquí la configuración de tu proyecto Firebase (consola → Configuración del proyecto → Tus apps → SDK). Luego habilita Authentication (correo/contraseña) y Firestore.</p>
  <textarea id="fb-cfg" placeholder='{"apiKey":"...","authDomain":"...","projectId":"...","storageBucket":"...","messagingSenderId":"...","appId":"..."}'>${esc(db.fb.config||'')}</textarea>
