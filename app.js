@@ -645,6 +645,7 @@ function renderAjustes(){
  <div class="card"><h3>💾 Respaldos cifrados</h3><p class="mut">El respaldo se cifra con AES-256 usando la contraseña que elijas (formato compatible con tu bóveda).</p>
  <div class="row"><button class="btn pri" data-act="exp-cif">⬇️ Exportar respaldo cifrado</button><button class="btn" data-act="imp-cif">⬆️ Importar respaldo cifrado</button></div>
  <div class="row" style="margin-top:8px"><button class="btn pri" data-act="exp-excel">📊 Descargar consolidado Excel</button></div> <div class="row" style="margin-top:8px"><button class="btn soft" data-act="exp-json">Exportar JSON simple</button><button class="btn soft" data-act="imp-json">Importar JSON</button></div></div>
+ <div class="row" style="margin-top:8px"><button class="btn pri" data-act="imp-excel">📊 Importar desde Excel</button></div>
  <div class="card"><h3>☁️ Sincronización Firebase (PC ↔ celular)</h3>
  <p class="mut">Pega aquí la configuración de tu proyecto Firebase (consola → Configuración del proyecto → Tus apps → SDK). Luego habilita Authentication (correo/contraseña) y Firestore.</p>
  <textarea id="fb-cfg" placeholder='{"apiKey":"...","authDomain":"...","projectId":"...","storageBucket":"...","messagingSenderId":"...","appId":"..."}'>${esc(db.fb.config||'')}</textarea>
@@ -967,6 +968,124 @@ async function generarPDFBoveda(regs,pass){
   styles:{fontSize:8},headStyles:{fillColor:[220,38,38]}});
  doc.save('Boveda_CONFIDENCIAL_'+today()+'.pdf');
 }
+/* ============================== IMPORTAR EXCEL ============================== */
+async function importarExcel(){
+ await cargarXLSX();
+ const inpF=document.createElement('input');
+ inpF.type='file';inpF.accept='.xlsx,.xls';
+ inpF.onchange=async()=>{
+  const file=inpF.files[0];if(!file)return;
+  toast('⏳ Leyendo Excel…');
+  try{
+   const data=await file.arrayBuffer();
+   const wb=XLSX.read(data,{type:'array',cellDates:true});
+   const resumen={deudas:[],cuentas:[],tarjetas:[],gastos:[]};
+   
+   // Extraer Deudas
+   if(wb.SheetNames.some(n=>n.toLowerCase().includes('deuda'))){
+    const sheet=wb.Sheets[wb.SheetNames.find(n=>n.toLowerCase().includes('deuda'))];
+    const rows=XLSX.utils.sheet_to_json(sheet,{defval:''});
+    rows.forEach(r=>{
+     const nombre=r['Descripción / Acreedor']||r['Nombre o Tarjeta']||r['Tarjeta / Deuda'];
+     if(!nombre||nombre==='TOTAL')return;
+     const monto=Number(String(r['Monto total ($)']||r['Límite ($)']||0).replace(/[^0-9.-]/g,''))||0;
+     const saldo=Number(String(r['Saldo pendiente ($)']||r['Saldo Usado ($)']||monto).replace(/[^0-9.-]/g,''))||monto;
+     const cuota=Number(String(r['Cuota mensual ($)']||r['Pago mínimo ($)']||0).replace(/[^0-9.-]/g,''))||0;
+     const venc=r['Vencimiento']||r['Fecha Pago'];
+     const resp=r['Responsable']||r['Titular']||'Ricardo';
+     const estado=(r['Estado']||'').toLowerCase();
+     let est='vigente';
+     if(estado.includes('mor')||estado.includes('venc'))est='morosa';
+     else if(estado.includes('pag')||estado.includes('cancel'))est='pagada';
+     
+     const acreedor=db.acreedores.find(a=>a.nombre.toLowerCase().includes(String(r['Banco o Entidad']||r['Entidad']||'').toLowerCase().split(' ')[0]))?.id||db.acreedores[0].id;
+     
+     resumen.deudas.push({
+      id:uid(),nombre:String(nombre),tipoDeuda:r['Tipo']||'Tarjeta de Crédito',
+      conTipo:'financiera',acreedorId:acreedor,persona:String(resp),
+      montoTotal:monto,saldoTotal:saldo,montoFacturadoMes:cuota,
+      tienePagoMinimo:cuota>0,pagoMinimo:cuota,vencimiento:venc||null,
+      sinVencimiento:!venc,estado:est,archivada:false,notas:r['Notas']||''
+     });
+    });
+   }
+   
+   // Extraer Cuentas
+   if(wb.SheetNames.some(n=>n.toLowerCase().includes('cuenta')&&n.toLowerCase().includes('banc'))){
+    const sheet=wb.Sheets[wb.SheetNames.find(n=>n.toLowerCase().includes('cuenta')&&n.toLowerCase().includes('banc'))];
+    const rows=XLSX.utils.sheet_to_json(sheet,{defval:''});
+    rows.forEach(r=>{
+     const num=String(r['N° de Cuenta']||'').replace(/\s/g,'');
+     if(!num||num.length<4)return;
+     resumen.cuentas.push({
+      id:uid(),persona:String(r['Persona']||'Ricardo'),
+      banco:String(r['Banco']||''),tipo:String(r['Tipo de Cuenta']||'Cuenta Corriente'),
+      numero:num,moneda:String(r['Moneda']||'CLP'),
+      estado:String(r['Estado']||'Activa'),nombre:String(r['Nombre Producto Específico']||r['Uso Principal']||''),
+      saldo:null,archivada:false
+     });
+    });
+   }
+   
+   // Extraer Tarjetas
+   const sheetTarjetas=wb.SheetNames.find(n=>n.toLowerCase().includes('tarjeta')&&(n.toLowerCase().includes('crédito')||n.toLowerCase().includes('débito')));
+   if(sheetTarjetas){
+    const sheet=wb.Sheets[sheetTarjetas];
+    const rows=XLSX.utils.sheet_to_json(sheet,{defval:''});
+    rows.forEach(r=>{
+     const numFis=String(r['Número']||r['Numero tarjeta Fisica']||'').replace(/\s/g,'');
+     const numVirt=String(r['Numero Tarjeta Virtual']||'').replace(/\s/g,'');
+     if(!numFis&&!numVirt)return;
+     
+     if(numFis&&numFis.length>4){
+      resumen.tarjetas.push({
+       id:uid(),persona:String(r['Responsable']||r['Titular']||'Ricardo'),
+       entidad:String(r['Banco o Entidad']||''),tipo:String(r['Tipo']||'Tarjeta Crédito'),
+       formato:'Física',numero:'•••• •••• •••• '+numFis.slice(-4),
+       venc:String(r['Vencimiento']||''),archivada:false
+      });
+     }
+     if(numVirt&&numVirt.length>4){
+      resumen.tarjetas.push({
+       id:uid(),persona:String(r['Responsable']||r['Titular']||'Ricardo'),
+       entidad:String(r['Banco o Entidad']||''),tipo:String(r['Tipo']||'Tarjeta Débito'),
+       formato:'Virtual',numero:'•••• •••• •••• '+numVirt.slice(-4),
+       venc:String(r['vencimiento tarjeta Virtual']||''),archivada:false
+      });
+     }
+    });
+   }
+   
+   // Mostrar vista previa
+   openModal('📊 Importar desde Excel',`
+    <p>Se encontraron:</p>
+    <ul style="list-style:none;padding:0">
+     <li>💳 <b>${resumen.deudas.length}</b> deudas</li>
+     <li>🏛️ <b>${resumen.cuentas.length}</b> cuentas bancarias</li>
+     <li>💳 <b>${resumen.tarjetas.length}</b> tarjetas</li>
+    </ul>
+    <p class="mut">¿Qué deseas hacer con estos datos?</p>
+    <div class="frm-btns">
+     <button type="button" class="btn pri" id="imp-reemp">🔄 Reemplazar todo</button>
+     <button type="button" class="btn" id="imp-fusion">➕ Agregar a existentes</button>
+     <button type="button" class="btn" data-act="close-modal">Cancelar</button>
+    </div>`);
+   
+   $('#imp-reemp').onclick=()=>{
+    db.deudas=resumen.deudas;db.cuentas=resumen.cuentas;db.tarjetas=resumen.tarjetas;
+    save();closeModal();render();toast('✅ Datos reemplazados desde Excel');
+   };
+   $('#imp-fusion').onclick=()=>{
+    db.deudas=db.deudas.concat(resumen.deudas);
+    db.cuentas=db.cuentas.concat(resumen.cuentas);
+    db.tarjetas=db.tarjetas.concat(resumen.tarjetas);
+    save();closeModal();render();toast('✅ Datos agregados desde Excel');
+   };
+   
+  }catch(e){console.error(e);toast('❌ Error al leer el Excel: '+e.message);}
+ };
+ inpF.click();
+}
 /* ============================== ACCIONES GLOBALES ============================== */
 document.addEventListener('click',e=>{
  const b=e.target.closest('[data-act]');if(!b)return;
@@ -1044,6 +1163,7 @@ document.addEventListener('click',e=>{
       db=JSON.parse(dec(pt));localStorage.setItem(LS,JSON.stringify(db));evaluarDeudas();closeModal();render();toast('✅ Respaldo importado');
     }catch(err){toast('❌ Contraseña incorrecta o archivo inválido');}};};inpF.click();break;};
     case 'exp-boveda-pdf':exportBovedaPDF();break;
+     case 'imp-excel':importarExcel();break;
   case 'exp-excel':exportarExcel();break;
   case 'exp-json':descargar('billetera_'+today()+'.json',JSON.stringify(db));break;
     case 'imp-json':{const inpF=document.createElement('input');inpF.type='file';inpF.accept='.json';inpF.onchange=async()=>{
