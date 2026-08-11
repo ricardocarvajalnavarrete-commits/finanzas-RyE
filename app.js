@@ -21,7 +21,7 @@ function seed(){
  const C=(persona,banco,tipo,numero,moneda='CLP',estado='Activa',nombre='')=>({id:uid(),persona,banco,tipo,numero,moneda,estado,nombre,saldo:null,archivada:false});
  const T=(persona,entidad,tipo,formato,numero,venc='')=>({id:uid(),persona,entidad,tipo,formato,numero,venc,archivada:false});
  return {
-  updatedAt:Date.now(), auth:null, fb:{config:'',activo:false},
+updatedAt:Date.now(), auth:null, fb:{config:'',activo:false}, esSeed:true,
   ajustes:{diasAviso:5},
   personas:['Ricardo','Elías'],
   categorias:['Alimentación','Transporte','Salud','Educación','Hogar y servicios','Entretención','Vestuario','Deudas','Ahorro','Otros'],
@@ -139,8 +139,17 @@ function seed(){
 const LS='billetera_familiar_v1';
 let db=null, curView='dashboard', unlocked=false, showNums=false, deudaFilter='todas', deudaVerArch=false, pagoVerArch=false;
 function load(){try{const s=localStorage.getItem(LS);return s?JSON.parse(s):null;}catch(e){return null;}}
-function save(){db.updatedAt=Date.now();localStorage.setItem(LS,JSON.stringify(db));pushFB();}
-function init(){db=load()||seed();localStorage.setItem(LS,JSON.stringify(db));evaluarDeudas();}
+let _auto=false, syncDecidido=false;
+function save(){db.updatedAt=Date.now();if(!_auto)db.esSeed=false;localStorage.setItem(LS,JSON.stringify(db));pushFB();}
+function dbValida(d){return !!(d&&Array.isArray(d.deudas)&&Array.isArray(d.pagos)&&Array.isArray(d.cuentas)&&Array.isArray(d.acreedores)&&Array.isArray(d.gastos));}
+function completarDB(d){d.ajustes=d.ajustes||{diasAviso:5};d.fb=d.fb||{config:'',activo:false};d.personas=d.personas||['Ricardo','Elías'];d.categorias=d.categorias||[];d.tarjetas=d.tarjetas||[];d.ingresos=d.ingresos||[];d.presupuestos=d.presupuestos||[];d.metas=d.metas||[];return d;}
+function init(){
+ let d=load();
+ if(!dbValida(d)){localStorage.removeItem(LS);d=null;}
+ db=completarDB(d||seed());
+ localStorage.setItem(LS,JSON.stringify(db));
+ evaluarDeudas();
+}
 
 /* ============================== LÓGICA DE DEUDAS ============================== */
 const debtById=id=>db.deudas.find(d=>d.id===id);
@@ -176,7 +185,7 @@ function evaluarDeudas(){
   if(vencido&&abonosCiclo(d)<minPago(d)&&d.estado!=='morosa'){d.estado='morosa';cambio=true;}
   else if(!vencido&&d.estado==='morosa'){d.estado='vigente';cambio=true;}
  }
- if(cambio)save();
+ if(cambio){_auto=true;save();_auto=false;}
 }
 function registrarPago(id,fecha,monto){
  const d=debtById(id); if(!d)return;
@@ -643,7 +652,7 @@ function renderAjustes(){
  <label class="chk"><input type="checkbox" id="fb-act" ${db.fb.activo?'checked':''} ${fb.user?'':'disabled'}> Sincronización automática activada</label>
  <p class="mut">Cuando está activa, todo lo que cambies aquí se reflejará en tus otros dispositivos (y viceversa) sin exportar/importar.</p></div>
  <div class="card"><h3>🧹 Datos</h3><button class="btn warn" data-act="reset">⚠️ Borrar todos los datos y reiniciar</button></div>`;
- const fa=$('#fb-act');if(fa)fa.onchange=e=>{db.fb.activo=e.target.checked;save();toast(db.fb.activo?'☁️ Sincronización activada':'Sincronización desactivada');};
+ const fa=$('#fb-act');if(fa)fa.onchange=e=>{db.fb.activo=e.target.checked;save();toast(db.fb.activo?'☁️ Sincronización activada':'Sincronización desactivada');if(db.fb.activo)syncStart();};
 }
 
 /* ============================== CRIPTOGRAFÍA ============================== */
@@ -717,16 +726,40 @@ async function initFB(){
 let _snap=null,_pushT=null;
 async function syncStart(){
  if(!fb.user||!db.fb.activo)return;
- const {doc,onSnapshot}=await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js');
+ const m=await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js');
  if(_snap)_snap();
- _snap=onSnapshot(doc(fb.dbfs,'users',fb.user.uid,'data','main'),snap=>{
+ const ref=m.doc(fb.dbfs,'users',fb.user.uid,'data','main');
+ if(syncDecidido){iniciarSnapshot(m,ref);return;}
+ let remoto=null;
+ try{const s=await m.getDoc(ref);if(s.exists())remoto=s.data();}catch(e){}
+ if(!remoto){syncDecidido=true;iniciarSnapshot(m,ref);pushFB();return;}
+ if(db.esSeed){aplicarRemoto(remoto);syncDecidido=true;iniciarSnapshot(m,ref);updateSyncChip(true);toast('☁️ Se restauró tu información desde la nube');return;}
+ openModal('☁️ Hay dos versiones de tu información',`
+  <p>En la <b>nube</b> hay información del ${new Date(remoto.updatedAt||0).toLocaleString()} y en <b>este dispositivo</b> del ${new Date(db.updatedAt).toLocaleString()}.</p>
+  <p class="mut">Elige cuál conservar; la otra se sobrescribirá.</p>
+  <div class="frm-btns">
+   <button type="button" class="btn pri" id="sc-nube">⬇️ Usar la nube</button>
+   <button type="button" class="btn" id="sc-local">⬆️ Usar este dispositivo</button>
+  </div>`);
+ $('#sc-nube').onclick=()=>{aplicarRemoto(remoto);syncDecidido=true;iniciarSnapshot(m,ref);closeModal();updateSyncChip(true);};
+ $('#sc-local').onclick=()=>{syncDecidido=true;iniciarSnapshot(m,ref);closeModal();pushFB();};
+}
+function aplicarRemoto(r){
+ try{
+  const d=JSON.parse(r.json);
+  if(!dbValida(d))return toast('❌ El respaldo de la nube está dañado');
+  db=completarDB(d);db.esSeed=false;localStorage.setItem(LS,JSON.stringify(db));evaluarDeudas();render();
+ }catch(e){toast('❌ No se pudo leer el respaldo de la nube');}
+}
+function iniciarSnapshot(m,ref){
+ _snap=m.onSnapshot(ref,snap=>{
   if(!snap.exists())return;const r=snap.data();
-  if(r.updatedAt>db.updatedAt){db=JSON.parse(r.json);localStorage.setItem(LS,JSON.stringify(db));evaluarDeudas();render();toast('☁️ Datos actualizados desde otro dispositivo');updateSyncChip();}
+  if(syncDecidido&&r.updatedAt>db.updatedAt){db=completarDB(JSON.parse(r.json));db.esSeed=false;localStorage.setItem(LS,JSON.stringify(db));evaluarDeudas();render();toast('☁️ Datos actualizados desde otro dispositivo');updateSyncChip();}
  });
 }
 async function pushFB(){
  updateSyncChip();
- if(!(fb.user&&db.fb.activo&&fb.loaded))return;
+ if(!(fb.user&&db.fb.activo&&fb.loaded&&syncDecidido))return;
  clearTimeout(_pushT);
  _pushT=setTimeout(async()=>{try{
   const {doc,setDoc}=await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js');
@@ -1013,8 +1046,10 @@ document.addEventListener('click',e=>{
     case 'exp-boveda-pdf':exportBovedaPDF();break;
   case 'exp-excel':exportarExcel();break;
   case 'exp-json':descargar('billetera_'+today()+'.json',JSON.stringify(db));break;
-  case 'imp-json':{const inpF=document.createElement('input');inpF.type='file';inpF.accept='.json';inpF.onchange=async()=>{
-    db=JSON.parse(await inpF.files[0].text());localStorage.setItem(LS,JSON.stringify(db));evaluarDeudas();render();toast('✅ Importado');};inpF.click();break;}
+    case 'imp-json':{const inpF=document.createElement('input');inpF.type='file';inpF.accept='.json';inpF.onchange=async()=>{
+    let d=null;try{d=JSON.parse(await inpF.files[0].text());}catch(e){}
+    if(!dbValida(d))return toast('❌ El archivo no es un respaldo válido de la Billetera');
+    db=completarDB(d);db.esSeed=false;localStorage.setItem(LS,JSON.stringify(db));evaluarDeudas();render();toast('✅ Importado');};inpF.click();break;}
   case 'fb-save':db.fb.config=$('#fb-cfg').value.trim();save();initFB();toast('💾 Configuración guardada');break;
   case 'fb-login':fbAuthModal(false);break; case 'fb-reg':fbAuthModal(true);break;
   case 'fb-out':import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js').then(m=>m.signOut(fb.auth));break;
