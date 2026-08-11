@@ -1,5 +1,4 @@
-@@ -1,1218 +1,1218 @@
-console.log('👛 Billetera v3 — archivo completo consolidado');
+console.log('👛 Billetera v5 — completo + seguridad');
 'use strict';
 /* ============================== UTILIDADES ============================== */
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
@@ -14,6 +13,21 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const inp=(id,label,val='',type='text',extra='')=>`<label class="fld"><span>${label}</span><input id="${id}" type="${type}" value="${esc(val)}" ${extra}></label>`;
 const sel=(id,label,opts,val='')=>`<label class="fld"><span>${label}</span><select id="${id}">${opts.map(([v,l])=>`<option value="${esc(v)}" ${String(v)===String(val)?'selected':''}>${esc(l)}</option>`).join('')}</select></label>`;
 const fmtK=n=>n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?Math.round(n/1e3)+'k':Math.round(n);
+const normKey=k=>String(k).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'');
+
+/* ============================== SEGURIDAD Y RESPALDO ============================== */
+const LS='billetera_familiar_v1';
+const LS_BACKUP='billetera_backup_auto';
+function guardarBackup(){try{localStorage.setItem(LS_BACKUP,JSON.stringify({fecha:Date.now(),db:db}));}catch(e){}}
+window.addEventListener('error',e=>{
+ if(document.getElementById('err-fatal'))return;
+ const d=document.createElement('div');d.id='err-fatal';
+ d.style.cssText='position:fixed;inset:0;background:#0f172a;color:#f8fafc;z-index:99999;display:flex;align-items:center;justify-content:center;padding:24px;font-family:system-ui,sans-serif;text-align:center';
+ d.innerHTML='<div style="max-width:560px"><h2 style="font-size:22px;margin:0 0 10px">⚠️ La app encontró un error</h2><p style="opacity:.85;margin:0 0 6px">'+String(e.message||'Error desconocido')+' (línea '+(e.lineno||'?')+')</p><p style="opacity:.85;margin:0 0 16px">Tus datos están protegidos por la copia automática.</p><button id="ef-fix" style="background:#16a34a;color:#fff;border:0;border-radius:10px;padding:12px 18px;margin:4px;font-size:15px;cursor:pointer">🔧 Reparar datos y recargar</button><button id="ef-reload" style="background:#334155;color:#fff;border:0;border-radius:10px;padding:12px 18px;margin:4px;font-size:15px;cursor:pointer">🔄 Solo recargar</button></div>';
+ document.body.appendChild(d);
+ const f=document.getElementById('ef-fix');if(f)f.onclick=()=>{try{const b=JSON.parse(localStorage.getItem('billetera_backup_auto')||'null');if(b&&b.db)localStorage.setItem('billetera_familiar_v1',JSON.stringify(b.db));}catch(err){}location.reload();};
+ const r=document.getElementById('ef-reload');if(r)r.onclick=()=>location.reload();
+});
 
 /* ============================== DATOS BASE ============================== */
 function seed(){
@@ -137,18 +151,21 @@ updatedAt:Date.now(), auth:null, fb:{config:'',activo:false}, esSeed:true,
 }
 
 /* ============================== ESTADO ============================== */
-const LS='billetera_familiar_v1';
 let db=null, curView='dashboard', unlocked=false, showNums=false, deudaFilter='todas', deudaVerArch=false, pagoVerArch=false;
-function load(){try{const s=localStorage.getItem(LS);return s?JSON.parse(s):null;}catch(e){return null;}}
 let _auto=false, syncDecidido=false;
-function save(){db.updatedAt=Date.now();if(!_auto)db.esSeed=false;localStorage.setItem(LS,JSON.stringify(db));pushFB();}
+function load(){try{const s=localStorage.getItem(LS);return s?JSON.parse(s):null;}catch(e){return null;}}
+function save(){db.updatedAt=Date.now();if(!_auto)db.esSeed=false;localStorage.setItem(LS,JSON.stringify(db));guardarBackup();pushFB();}
 function dbValida(d){return !!(d&&Array.isArray(d.deudas)&&Array.isArray(d.pagos)&&Array.isArray(d.cuentas)&&Array.isArray(d.acreedores)&&Array.isArray(d.gastos));}
 function completarDB(d){d.ajustes=d.ajustes||{diasAviso:5};d.fb=d.fb||{config:'',activo:false};d.personas=d.personas||['Ricardo','Elías'];d.categorias=d.categorias||[];d.tarjetas=d.tarjetas||[];d.ingresos=d.ingresos||[];d.presupuestos=d.presupuestos||[];d.metas=d.metas||[];return d;}
 function init(){
  let d=load();
+ if(!dbValida(d)){
+  try{const b=JSON.parse(localStorage.getItem(LS_BACKUP)||'null');if(b&&dbValida(b.db))d=b.db;}catch(e){}
+ }
  if(!dbValida(d)){localStorage.removeItem(LS);d=null;}
  db=completarDB(d||seed());
  localStorage.setItem(LS,JSON.stringify(db));
+ guardarBackup();
  evaluarDeudas();
 }
 
@@ -627,6 +644,7 @@ function renderArchivo(){
 /* ============================== AJUSTES ============================== */
 function renderAjustes(){
  const noti=('Notification'in window)?Notification.permission:'unsupported';
+ let bk=null;try{const b=JSON.parse(localStorage.getItem(LS_BACKUP)||'null');if(b)bk=new Date(b.fecha).toLocaleString();}catch(e){}
  $('#ct-ajustes').innerHTML=`<h2>⚙️ Ajustes</h2>
  <div class="card"><h3>👥 Miembros del hogar</h3>${db.personas.map((p,i)=>`<div class="list-item"><input class="fld-inp" value="${esc(p)}" data-i="${i}" style="padding:7px;border:1px solid #cbd5e1;border-radius:8px;max-width:220px"></div>`).join('')}
  <button class="btn pri mini" data-act="save-personas">💾 Guardar nombres</button></div>
@@ -643,12 +661,12 @@ function renderAjustes(){
  ${inp('aviso','Avisar vencimientos con anticipación (días)',db.ajustes.diasAviso??5,'number')}
  <button class="btn pri" data-act="notif-perm">🔔 Activar notificaciones</button> <button class="btn" data-act="save-aviso">Guardar días</button></div>
  <div class="card"><h3>📱 Instalar app</h3><p class="mut">En el celular: usa el menú del navegador → "Agregar a pantalla de inicio" o el banner de instalación. En iPhone: Compartir → Agregar a inicio.</p><button class="btn pri" data-act="install">📲 Instalar ahora</button></div>
- <div class="card"><h3>💾 Respaldos cifrados</h3><p class="mut">El respaldo se cifra con AES-256 usando la contraseña que elijas (formato compatible con tu bóveda).</p>
+ <div class="card"><h3>💾 Respaldos y seguridad</h3><p class="mut">El respaldo se cifra con AES-256 usando la contraseña que elijas (formato compatible con tu bóveda).</p>
  <div class="row"><button class="btn pri" data-act="exp-cif">⬇️ Exportar respaldo cifrado</button><button class="btn" data-act="imp-cif">⬆️ Importar respaldo cifrado</button></div>
- <div class="row" style="margin-top:8px"><button class="btn pri" data-act="exp-excel">📊 Descargar consolidado Excel</button></div> <div class="row" style="margin-top:8px"><button class="btn soft" data-act="exp-json">Exportar JSON simple</button><button class="btn soft" data-act="imp-json">Importar JSON</button></div></div>
- <div class="row" style="margin-top:8px"><button class="btn pri" data-act="imp-excel">📊 Importar desde Excel</button></div>
-  <div class="row" style="margin-top:8px"><button class="btn pri" data-act="exp-excel">📊 Descargar Excel</button><button class="btn pri" data-act="imp-excel" style="margin-left:8px">📊 Importar Excel</button></div> 
- <div class="row" style="margin-top:8px"><button class="btn soft" data-act="exp-json">Exportar JSON simple</button><button class="btn soft" data-act="imp-json">Importar JSON</button></div></div>
+ <div class="row" style="margin-top:8px"><button class="btn pri" data-act="exp-excel">📊 Descargar Excel</button><button class="btn pri" data-act="imp-excel" style="margin-left:8px">📥 Importar Excel</button></div>
+ <div class="row" style="margin-top:8px"><button class="btn soft" data-act="exp-json">Exportar JSON</button><button class="btn soft" data-act="imp-json">Importar JSON</button></div>
+ <div class="row" style="margin-top:8px"><button class="btn soft" data-act="rest-backup">🛟 Restaurar copia automática</button></div>
+ <p class="mut">🛡️ Copia automática interna: ${bk?('última guarda '+bk):'aún sin copia'}.</p></div>
  <div class="card"><h3>☁️ Sincronización Firebase (PC ↔ celular)</h3>
  <p class="mut">Pega aquí la configuración de tu proyecto Firebase (consola → Configuración del proyecto → Tus apps → SDK). Luego habilita Authentication (correo/contraseña) y Firestore.</p>
  <textarea id="fb-cfg" placeholder='{"apiKey":"...","authDomain":"...","projectId":"...","storageBucket":"...","messagingSenderId":"...","appId":"..."}'>${esc(db.fb.config||'')}</textarea>
@@ -857,8 +875,7 @@ async function exportarExcel(){
  X.utils.book_append_sheet(wb,X.utils.json_to_sheet(db.presupuestos.map(p=>{
   const g=gastoCatMes(p.categoria,mes);
   return {Categoria:p.categoria,'Límite mensual':p.limite,'Gastado mes':g,'% uso':p.limite>0?Math.round(g/p.limite*100):0};
-  })),
-  'Presupuesto');
+ })),'Presupuesto');
  X.utils.book_append_sheet(wb,X.utils.json_to_sheet(db.metas.map(m=>({
   Nombre:m.nombre,Objetivo:m.objetivo,Ahorrado:m.ahorrado||0,'% avance':m.objetivo>0?Math.round((m.ahorrado||0)/m.objetivo*100):0,
   'Aporte mensual':m.aporteMensual||0,'Aporte automático':m.autoAporte?'Sí':'No',Archivada:m.archivada?'Sí':'No'
@@ -866,6 +883,7 @@ async function exportarExcel(){
  X.writeFile(wb,'Billetera_Consolidado_'+hoy+'.xlsx');
  toast('⬇️ Excel descargado');
 }
+
 /* ============================== BÓVEDA → PDF PROTEGIDO ============================== */
 function cargarLibPDF(){
  return new Promise((res,rej)=>{
@@ -879,7 +897,6 @@ function cargarLibPDF(){
  });
 }
 function limpiarKeys(obj){const o={};for(const k in obj)o[k.trim()]=obj[k];return o;}
-function normKey(k){return String(k).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'');}
 function getCampo(r,sins){
  const keys=Object.keys(r||{});
  for(const n of sins){for(const k of keys){if(normKey(k)===n)return r[k];}}
@@ -949,7 +966,7 @@ async function exportBovedaPDF(){
   const datos=await descifrarBoveda(obj,pass);
   if(!datos)return toast('❌ La contraseña no coincide con este archivo. Sube el boveda_cifrada.json más reciente o revisa la clave.');
   await generarPDFBoveda(normalizarBoveda(datos),pdfPass);
-  closeModal();toast('⬇️ PDF protegido descargado');
+ido descargado');
  };
 }
 async function generarPDFBoveda(regs,pass){
@@ -966,100 +983,64 @@ async function generarPDFBoveda(regs,pass){
   body:cuentas.map(r=>[r.titular,r.tipo,r.banco,r.numero,r.notas]),
   styles:{fontSize:8},headStyles:{fillColor:[14,124,102]}});
  doc.addPage();
-  doc.autoTable({startY:16,head:[['Titular','Tipo','Formato','Banco','Número','Vence','CVV','Notas']],
+ doc.autoTable({startY:16,head:[['Titular','Tipo','Formato','Banco','Número','Vence','CVV','Notas']],
   body:tarjetas.map(r=>[r.titular,r.tipo,r.formato,r.banco,r.numero,r.vence,r.ccv,r.notas]),
   styles:{fontSize:8},headStyles:{fillColor:[220,38,38]}});
  doc.save('Boveda_CONFIDENCIAL_'+today()+'.pdf');
 }
 /* ============================== IMPORTAR EXCEL ============================== */
+function parseFecha(v){
+ if(!v)return null;
+ if(v instanceof Date&&!isNaN(v))return v.toISOString().slice(0,10);
+ const s=String(v).trim();
+ let m=s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
+ if(m){let y=+m[3];if(y<100)y+=2000;return y+'-'+String(+m[2]).padStart(2,'0')+'-'+String(+m[1]).padStart(2,'0');}
+ m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);if(m)return m[1]+'-'+String(+m[2]).padStart(2,'0')+'-'+String(+m[3]).padStart(2,'0');
+ return null;
+}
 async function importarExcel(){
  await cargarXLSX();
- const inpF=document.createElement('input');
- inpF.type='file';inpF.accept='.xlsx,.xls';
+ const inpF=document.createElement('input');inpF.type='file';inpF.accept='.xlsx,.xls';
  inpF.onchange=async()=>{
   const file=inpF.files[0];if(!file)return;
   toast('⏳ Leyendo Excel…');
   try{
-   const data=await file.arrayBuffer();
-   const wb=XLSX.read(data,{type:'array',cellDates:true});
-   const resumen={deudas:[],cuentas:[],tarjetas:[],gastos:[]};
-
-   // Extraer Deudas
-   if(wb.SheetNames.some(n=>n.toLowerCase().includes('deuda'))){
-    const sheet=wb.Sheets[wb.SheetNames.find(n=>n.toLowerCase().includes('deuda'))];
-    const rows=XLSX.utils.sheet_to_json(sheet,{defval:''});
-    rows.forEach(r=>{
-     const nombre=r['Descripción / Acreedor']||r['Nombre o Tarjeta']||r['Tarjeta / Deuda'];
-     if(!nombre||nombre==='TOTAL')return;
-     const monto=Number(String(r['Monto total ($)']||r['Límite ($)']||0).replace(/[^0-9.-]/g,''))||0;
-     const saldo=Number(String(r['Saldo pendiente ($)']||r['Saldo Usado ($)']||monto).replace(/[^0-9.-]/g,''))||monto;
-     const cuota=Number(String(r['Cuota mensual ($)']||r['Pago mínimo ($)']||0).replace(/[^0-9.-]/g,''))||0;
-     const venc=r['Vencimiento']||r['Fecha Pago'];
-     const resp=r['Responsable']||r['Titular']||'Ricardo';
-     const estado=(r['Estado']||'').toLowerCase();
-     let est='vigente';
-     if(estado.includes('mor')||estado.includes('venc'))est='morosa';
-     else if(estado.includes('pag')||estado.includes('cancel'))est='pagada';
-
-     const acreedor=db.acreedores.find(a=>a.nombre.toLowerCase().includes(String(r['Banco o Entidad']||r['Entidad']||'').toLowerCase().split(' ')[0]))?.id||db.acreedores[0].id;
-
-     resumen.deudas.push({
-      id:uid(),nombre:String(nombre),tipoDeuda:r['Tipo']||'Tarjeta de Crédito',
-      conTipo:'financiera',acreedorId:acreedor,persona:String(resp),
-      montoTotal:monto,saldoTotal:saldo,montoFacturadoMes:cuota,
-      tienePagoMinimo:cuota>0,pagoMinimo:cuota,vencimiento:venc||null,
-      sinVencimiento:!venc,estado:est,archivada:false,notas:r['Notas']||''
-     });
-    });
-   }
-
-   // Extraer Cuentas
-   if(wb.SheetNames.some(n=>n.toLowerCase().includes('cuenta')&&n.toLowerCase().includes('banc'))){
-    const sheet=wb.Sheets[wb.SheetNames.find(n=>n.toLowerCase().includes('cuenta')&&n.toLowerCase().includes('banc'))];
-    const rows=XLSX.utils.sheet_to_json(sheet,{defval:''});
-    rows.forEach(r=>{
-     const num=String(r['N° de Cuenta']||'').replace(/\s/g,'');
-     if(!num||num.length<4)return;
-     resumen.cuentas.push({
-      id:uid(),persona:String(r['Persona']||'Ricardo'),
-      banco:String(r['Banco']||''),tipo:String(r['Tipo de Cuenta']||'Cuenta Corriente'),
-      numero:num,moneda:String(r['Moneda']||'CLP'),
-      estado:String(r['Estado']||'Activa'),nombre:String(r['Nombre Producto Específico']||r['Uso Principal']||''),
-      saldo:null,archivada:false
-     });
-    });
-   }
-
-   // Extraer Tarjetas
-   const sheetTarjetas=wb.SheetNames.find(n=>n.toLowerCase().includes('tarjeta')&&(n.toLowerCase().includes('crédito')||n.toLowerCase().includes('débito')));
-   if(sheetTarjetas){
-    const sheet=wb.Sheets[sheetTarjetas];
-    const rows=XLSX.utils.sheet_to_json(sheet,{defval:''});
-    rows.forEach(r=>{
+   const wb=XLSX.read(await file.arrayBuffer(),{type:'array'});
+   const resumen={deudas:[],cuentas:[],tarjetas:[]};
+   const num=v=>Number(String(v).replace(/[^0-9.-]/g,''))||0;
+   const sd=wb.SheetNames.find(n=>normKey(n).includes('deuda'));
+   if(sd){XLSX.utils.sheet_to_json(wb.Sheets[sd],{defval:''}).forEach(r=>{
+     const nombre=getCampo(r,['descripcion','acreedor','nombre','tarjeta']);
+     if(!nombre||String(nombre).toUpperCase().includes('TOTAL'))return;
+     const monto=num(getCampo(r,['montototal']));
+     const saldo=num(getCampo(r,['saldopendiente','saldousado']))||monto;
+     const cuota=num(getCampo(r,['cuotamensual','pagominimo']));
+     const venc=parseFecha(getCampo(r,['vencimiento']));
+     const estado=String(getCampo(r,['estado'])).toLowerCase();
+     let est='vigente';if(estado.includes('mor')||estado.includes('venc'))est='morosa';else if(estado.includes('pag')||estado.includes('cancel'))est='pagada';
+     const entidad=String(getCampo(r,['banco','entidad']));
+     const ac=db.acreedores.find(a=>a.nombre.toLowerCase().includes(entidad.toLowerCase().split(' ')[0]))?.id||db.acreedores[0].id;
+     resumen.deudas.push({id:uid(),nombre:String(nombre),tipoDeuda:String(getCampo(r,['tipo'])||'Tarjeta de Crédito'),conTipo:'financiera',acreedorId:ac,persona:String(getCampo(r,['responsable'])||'Ricardo'),montoTotal:monto,saldoTotal:saldo,montoFacturadoMes:cuota,tienePagoMinimo:cuota>0,pagoMinimo:cuota,vencimiento:venc,sinVencimiento:!venc,estado:est,archivada:false,notas:String(getCampo(r,['notas'])||'')});
+   });}
+   const sc=wb.SheetNames.find(n=>normKey(n).includes('cuenta')&&normKey(n).includes('banc'));
+   if(sc){XLSX.utils.sheet_to_json(wb.Sheets[sc],{defval:''}).forEach(r=>{
+     const numero=String(getCampo(r,['numerodecuenta','numero'])).replace(/\s/g,'');
+     if(!numero||numero.length<4)return;
+     resumen.cuentas.push({id:uid(),persona:String(getCampo(r,['persona'])||'Ricardo'),banco:String(getCampo(r,['banco'])||''),tipo:String(getCampo(r,['tipodecuenta','tipo'])||'Cuenta Corriente'),numero:numero,moneda:String(getCampo(r,['moneda'])||'CLP'),estado:String(getCampo(r,['estado'])||'Activa'),nombre:String(getCampo(r,['nombreproductoespecifico','usoprincipal'])||''),saldo:null,archivada:false});
+   });}
+   wb.SheetNames.filter(n=>normKey(n).includes('tarjeta')).forEach(sn=>{
+    XLSX.utils.sheet_to_json(wb.Sheets[sn],{defval:''}).forEach(r=>{
      const numFis=String(r['Número']||r['Numero tarjeta Fisica']||'').replace(/\s/g,'');
-     const numVirt=String(r['Numero Tarjeta Virtual']||'').replace(/\s/g,'');
+     const numVirt=String(r['Número_1']||r['Numero Tarjeta Virtual']||'').replace(/\s/g,'');
      if(!numFis&&!numVirt)return;
-
-     if(numFis&&numFis.length>4){
-      resumen.tarjetas.push({
-       id:uid(),persona:String(r['Responsable']||r['Titular']||'Ricardo'),
-       entidad:String(r['Banco o Entidad']||''),tipo:String(r['Tipo']||'Tarjeta Crédito'),
-       formato:'Física',numero:'•••• •••• •••• '+numFis.slice(-4),
-       venc:String(r['Vencimiento']||''),archivada:false
-      });
-     }
-     if(numVirt&&numVirt.length>4){
-      resumen.tarjetas.push({
-       id:uid(),persona:String(r['Responsable']||r['Titular']||'Ricardo'),
-       entidad:String(r['Banco o Entidad']||''),tipo:String(r['Tipo']||'Tarjeta Débito'),
-       formato:'Virtual',numero:'•••• •••• •••• '+numVirt.slice(-4),
-       venc:String(r['vencimiento tarjeta Virtual']||''),archivada:false
-      });
-     }
+     const tipoBase=String(r['Tipo']||'').toLowerCase();
+     let tipo='Tarjeta Crédito';
+     if(tipoBase.includes('débito')||tipoBase.includes('debito'))tipo='Tarjeta Débito';
+     else if(tipoBase.includes('prepago'))tipo='Tarjeta Prepago';
+     if(numFis&&numFis.length>=4)resumen.tarjetas.push({id:uid(),persona:String(r['Responsable']||r['Titular']||'Ricardo'),entidad:String(r['Banco o Entidad']||r['Entidad']||''),tipo:tipo,formato:'Física',numero:'•••• •••• •••• '+numFis.slice(-4),venc:String(r['Vencimiento']||''),archivada:false});
+     if(numVirt&&numVirt.length>=4)resumen.tarjetas.push({id:uid(),persona:String(r['Responsable']||r['Titular']||'Ricardo'),entidad:String(r['Banco o Entidad']||r['Entidad']||''),tipo:tipo,formato:'Virtual',numero:'•••• •••• •••• '+numVirt.slice(-4),venc:String(r['vencimiento_1']||r['vencimiento tarjeta Virtual']||''),archivada:false});
     });
-   }
-
-   // Mostrar vista previa
+   });
    openModal('📊 Importar desde Excel',`
     <p>Se encontraron:</p>
     <ul style="list-style:none;padding:0">
@@ -1073,18 +1054,8 @@ async function importarExcel(){
      <button type="button" class="btn" id="imp-fusion">➕ Agregar a existentes</button>
      <button type="button" class="btn" data-act="close-modal">Cancelar</button>
     </div>`);
-
-   $('#imp-reemp').onclick=()=>{
-    db.deudas=resumen.deudas;db.cuentas=resumen.cuentas;db.tarjetas=resumen.tarjetas;
-    save();closeModal();render();toast('✅ Datos reemplazados desde Excel');
-   };
-   $('#imp-fusion').onclick=()=>{
-    db.deudas=db.deudas.concat(resumen.deudas);
-    db.cuentas=db.cuentas.concat(resumen.cuentas);
-    db.tarjetas=db.tarjetas.concat(resumen.tarjetas);
-    save();closeModal();render();toast('✅ Datos agregados desde Excel');
-   };
-
+   $('#imp-reemp').onclick=()=>{db.deudas=resumen.deudas;db.cuentas=resumen.cuentas;db.tarjetas=resumen.tarjetas;save();closeModal();render();toast('✅ Datos reemplazados desde Excel');};
+   $('#imp-fusion').onclick=()=>{db.deudas=db.deudas.concat(resumen.deudas);db.cuentas=db.cuentas.concat(resumen.cuentas);db.tarjetas=db.tarjetas.concat(resumen.tarjetas);save();closeModal();render();toast('✅ Datos agregados desde Excel');};
   }catch(e){console.error(e);toast('❌ Error al leer el Excel: '+e.message);}
  };
  inpF.click();
@@ -1125,11 +1096,15 @@ document.addEventListener('click',e=>{
     if(usado)toast('⚠️ No se puede eliminar: hay deudas asociadas a este acreedor.');
     else confirmDlg('🗑️ Eliminar acreedor','¿Eliminar este acreedor?',()=>{db.acreedores=db.acreedores.filter(a=>a.id!==id);save();render();toast('🗑️ Eliminado');});break;}
   case 'toggle-nums':showNums=!showNums;renderCuentas();break;
-  case 'new-cuenta':cuentaModal();break; case 'edit-cuenta':cuentaModal(id);break;
-  case 'arch-cuenta':archToggle(db.cuentas,id,'Cuenta');break; case 'rest-cuenta':archToggle(db.cuentas,id,'Cuenta');break;
+  case 'new-cuenta':cuentaModal();break;
+  case 'edit-cuenta':cuentaModal(id);break;
+  case 'arch-cuenta':archToggle(db.cuentas,id,'Cuenta');break;
+  case 'rest-cuenta':archToggle(db.cuentas,id,'Cuenta');break;
   case 'del-cuenta':confirmDlg('🗑️ Eliminar cuenta','¿Eliminar definitivamente?',()=>{db.cuentas=db.cuentas.filter(c=>c.id!==id);save();render();});break;
-  case 'new-tarjeta':tarjetaModal();break; case 'edit-tarjeta':tarjetaModal(id);break;
-  case 'arch-tarjeta':archToggle(db.tarjetas,id,'Tarjeta');break; case 'rest-tarjeta':archToggle(db.tarjetas,id,'Tarjeta');break;
+  case 'new-tarjeta':tarjetaModal();break;
+  case 'edit-tarjeta':tarjetaModal(id);break;
+  case 'arch-tarjeta':archToggle(db.tarjetas,id,'Tarjeta');break;
+  case 'rest-tarjeta':archToggle(db.tarjetas,id,'Tarjeta');break;
   case 'del-tarjeta':confirmDlg('🗑️ Eliminar tarjeta','¿Eliminar definitivamente?',()=>{db.tarjetas=db.tarjetas.filter(t=>t.id!==id);save();render();});break;
   case 'new-pres':presModal();break;
   case 'edit-pres':presModal(id);break;
@@ -1138,8 +1113,10 @@ document.addEventListener('click',e=>{
   case 'del-ing':db.ingresos=db.ingresos.filter(i=>i.id!==id);save();render();break;
   case 'new-gasto':gastoModal();break;
   case 'del-gasto':db.gastos=db.gastos.filter(g=>g.id!==id);save();render();break;
-  case 'new-meta':metaModal();break; case 'edit-meta':metaModal(id);break;
-  case 'arch-meta':archToggle(db.metas,id,'Meta');break; case 'rest-meta':archToggle(db.metas,id,'Meta');break;
+  case 'new-meta':metaModal();break;
+  case 'edit-meta':metaModal(id);break;
+  case 'arch-meta':archToggle(db.metas,id,'Meta');break;
+  case 'rest-meta':archToggle(db.metas,id,'Meta');break;
   case 'aporte-meta':openModal('💰 Aportar a la meta',`<form id="frm_ap">${inp('ap_mon','Monto ($)','','number')}<div class="frm-btns"><button class="btn pri">Aportar</button></div></form>`);
    $('#frm_ap').onsubmit=e=>{e.preventDefault();const mt=find(db.metas,id);mt.ahorrado=(mt.ahorrado||0)+(+$('#ap_mon').value||0);save();closeModal();render();toast('💰 Aporte registrado');};break;
   case 'save-personas':$$('.fld-inp').forEach(inpEl=>{db.personas[inpEl.dataset.i]=inpEl.value.trim()||db.personas[inpEl.dataset.i];});save();render();toast('💾 Nombres guardados');break;
@@ -1163,18 +1140,22 @@ document.addEventListener('click',e=>{
     $('#frm_imp').onsubmit=async e=>{e.preventDefault();try{
       const key=await pbkdf2Key($('#imp_pw').value,new Uint8Array(obj.salt),['decrypt']);
       const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:new Uint8Array(obj.iv)},key,new Uint8Array(obj.data));
-      db=JSON.parse(dec(pt));localStorage.setItem(LS,JSON.stringify(db));evaluarDeudas();closeModal();render();toast('✅ Respaldo importado');
-    }catch(err){toast('❌ Contraseña incorrecta o archivo inválido');}};};inpF.click();break;};
-    case 'exp-boveda-pdf':exportBovedaPDF();break;
-     case 'imp-excel':importarExcel();break;
+      db=completarDB(JSON.parse(dec(pt)));db.esSeed=false;localStorage.setItem(LS,JSON.stringify(db));evaluarDeudas();closeModal();render();toast('✅ Respaldo importado');
+    }catch(err){toast('❌ Contraseña incorrecta o archivo inválido');}};};inpF.click();break;}
+  case 'exp-boveda-pdf':exportBovedaPDF();break;
+  case 'imp-excel':importarExcel();break;
   case 'exp-excel':exportarExcel();break;
   case 'exp-json':descargar('billetera_'+today()+'.json',JSON.stringify(db));break;
-    case 'imp-json':{const inpF=document.createElement('input');inpF.type='file';inpF.accept='.json';inpF.onchange=async()=>{
+  case 'imp-json':{const inpF=document.createElement('input');inpF.type='file';inpF.accept='.json';inpF.onchange=async()=>{
     let d=null;try{d=JSON.parse(await inpF.files[0].text());}catch(e){}
     if(!dbValida(d))return toast('❌ El archivo no es un respaldo válido de la Billetera');
     db=completarDB(d);db.esSeed=false;localStorage.setItem(LS,JSON.stringify(db));evaluarDeudas();render();toast('✅ Importado');};inpF.click();break;}
+  case 'rest-backup':{let b=null;try{b=JSON.parse(localStorage.getItem(LS_BACKUP)||'null');}catch(e){}
+    if(!b||!dbValida(b.db))return toast('❌ No hay copia automática válida');
+    confirmDlg('🛟 Restaurar copia automática','Se reemplazará la información actual por la copia del '+new Date(b.fecha).toLocaleString()+'. ¿Continuar?',()=>{db=completarDB(b.db);db.esSeed=false;localStorage.setItem(LS,JSON.stringify(db));render();toast('✅ Copia restaurada');});break;}
   case 'fb-save':db.fb.config=$('#fb-cfg').value.trim();save();initFB();toast('💾 Configuración guardada');break;
-  case 'fb-login':fbAuthModal(false);break; case 'fb-reg':fbAuthModal(true);break;
+  case 'fb-login':fbAuthModal(false);break;
+  case 'fb-reg':fbAuthModal(true);break;
   case 'fb-out':import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js').then(m=>m.signOut(fb.auth));break;
   case 'reset':confirmDlg('⚠️ Borrar todo','Se eliminarán TODOS los datos locales (deudas, cuentas, pagos…). ¿Continuar?',()=>{localStorage.removeItem(LS);location.reload();});break;
  }
@@ -1218,4 +1199,3 @@ if(db.auth&&!unlocked){$('#lock-screen').classList.remove('hidden');showBioButto
  bioUnlock().then(ok=>{if(ok)doUnlock();}).catch(()=>{});}
 else{unlocked=true;$('#lock-screen').classList.add('hidden');$('#app').classList.remove('hidden');render();revisarRecordatorios();aplicarAportesMes();}
 initFB();
-if('Notification'in window&&Notification.permission==='default'){setTimeout(()=>{if(confirm('¿Deseas recibir recordatorios de vencimiento de deudas?'))Notification.requestPermission();},4000);}
