@@ -1027,65 +1027,39 @@ async function importarExcel(){
     });
    }
    
-   // Extraer Tarjetas
-   const sheetTarjetas=wb.SheetNames.find(n=>n.toLowerCase().includes('tarjeta')&&(n.toLowerCase().includes('crédito')||n.toLowerCase().includes('débito')));
-   if(sheetTarjetas){
-    const sheet=wb.Sheets[sheetTarjetas];
-    const rows=XLSX.utils.sheet_to_json(sheet,{defval:''});
-    rows.forEach(r=>{
-     const numFis=String(r['Número']||r['Numero tarjeta Fisica']||'').replace(/\s/g,'');
-     const numVirt=String(r['Numero Tarjeta Virtual']||'').replace(/\s/g,'');
-     if(!numFis&&!numVirt)return;
+     // Extraer Tarjetas (Crédito, Débito y Prepago de todas las hojas)
+   const sheetsTarjetas = wb.SheetNames.filter(n => n.toLowerCase().includes('tarjeta'));
+   sheetsTarjetas.forEach(sheetName => {
+    const sheet = wb.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet, {defval:''});
+    rows.forEach(r => {
+     const numFis = String(r['Número'] || r['Numero tarjeta Fisica'] || '').replace(/\s/g,'');
+     const numVirt = String(r['Numero Tarjeta Virtual'] || '').replace(/\s/g,'');
+     if(!numFis && !numVirt) return;
      
-     if(numFis&&numFis.length>4){
+     const tipoBase = String(r['Tipo'] || '').toLowerCase();
+     let tipoFis = 'Tarjeta Crédito', tipoVirt = 'Tarjeta Débito';
+     if(tipoBase.includes('débito') || tipoBase.includes('debito')) { tipoFis = 'Tarjeta Débito'; tipoVirt = 'Tarjeta Débito'; }
+     else if(tipoBase.includes('prepago')) { tipoFis = 'Tarjeta Prepago'; tipoVirt = 'Tarjeta Prepago'; }
+
+     if(numFis && numFis.length >= 4){
       resumen.tarjetas.push({
-       id:uid(),persona:String(r['Responsable']||r['Titular']||'Ricardo'),
-       entidad:String(r['Banco o Entidad']||''),tipo:String(r['Tipo']||'Tarjeta Crédito'),
-       formato:'Física',numero:'•••• •••• •••• '+numFis.slice(-4),
-       venc:String(r['Vencimiento']||''),archivada:false
+       id:uid(), persona:String(r['Responsable'] || r['Titular'] || 'Ricardo'),
+       entidad:String(r['Banco o Entidad'] || r['Entidad'] || ''), tipo:tipoFis,
+       formato:'Física', numero:'•••• •••• •••• ' + numFis.slice(-4),
+       venc:String(r['Vencimiento'] || ''), archivada:false
       });
      }
-     if(numVirt&&numVirt.length>4){
+     if(numVirt && numVirt.length >= 4){
       resumen.tarjetas.push({
-       id:uid(),persona:String(r['Responsable']||r['Titular']||'Ricardo'),
-       entidad:String(r['Banco o Entidad']||''),tipo:String(r['Tipo']||'Tarjeta Débito'),
-       formato:'Virtual',numero:'•••• •••• •••• '+numVirt.slice(-4),
-       venc:String(r['vencimiento tarjeta Virtual']||''),archivada:false
+       id:uid(), persona:String(r['Responsable'] || r['Titular'] || 'Ricardo'),
+       entidad:String(r['Banco o Entidad'] || r['Entidad'] || ''), tipo:tipoVirt,
+       formato:'Virtual', numero:'•••• •••• •••• ' + numVirt.slice(-4),
+       venc:String(r['vencimiento tarjeta Virtual'] || r['Vencimiento'] || ''), archivada:false
       });
      }
     });
-   }
-   
-   // Mostrar vista previa
-   openModal('📊 Importar desde Excel',`
-    <p>Se encontraron:</p>
-    <ul style="list-style:none;padding:0">
-     <li>💳 <b>${resumen.deudas.length}</b> deudas</li>
-     <li>🏛️ <b>${resumen.cuentas.length}</b> cuentas bancarias</li>
-     <li>💳 <b>${resumen.tarjetas.length}</b> tarjetas</li>
-    </ul>
-    <p class="mut">¿Qué deseas hacer con estos datos?</p>
-    <div class="frm-btns">
-     <button type="button" class="btn pri" id="imp-reemp">🔄 Reemplazar todo</button>
-     <button type="button" class="btn" id="imp-fusion">➕ Agregar a existentes</button>
-     <button type="button" class="btn" data-act="close-modal">Cancelar</button>
-    </div>`);
-   
-   $('#imp-reemp').onclick=()=>{
-    db.deudas=resumen.deudas;db.cuentas=resumen.cuentas;db.tarjetas=resumen.tarjetas;
-    save();closeModal();render();toast('✅ Datos reemplazados desde Excel');
-   };
-   $('#imp-fusion').onclick=()=>{
-    db.deudas=db.deudas.concat(resumen.deudas);
-    db.cuentas=db.cuentas.concat(resumen.cuentas);
-    db.tarjetas=db.tarjetas.concat(resumen.tarjetas);
-    save();closeModal();render();toast('✅ Datos agregados desde Excel');
-   };
-   
-  }catch(e){console.error(e);toast('❌ Error al leer el Excel: '+e.message);}
- };
- inpF.click();
-}
+   });
 /* ============================== ACCIONES GLOBALES ============================== */
 document.addEventListener('click',e=>{
  const b=e.target.closest('[data-act]');if(!b)return;
