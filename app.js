@@ -1,3 +1,4 @@
+@@ -1,1218 +1,1218 @@
 console.log('👛 Billetera v3 — archivo completo consolidado');
 'use strict';
 /* ============================== UTILIDADES ============================== */
@@ -644,6 +645,8 @@ function renderAjustes(){
  <div class="card"><h3>📱 Instalar app</h3><p class="mut">En el celular: usa el menú del navegador → "Agregar a pantalla de inicio" o el banner de instalación. En iPhone: Compartir → Agregar a inicio.</p><button class="btn pri" data-act="install">📲 Instalar ahora</button></div>
  <div class="card"><h3>💾 Respaldos cifrados</h3><p class="mut">El respaldo se cifra con AES-256 usando la contraseña que elijas (formato compatible con tu bóveda).</p>
  <div class="row"><button class="btn pri" data-act="exp-cif">⬇️ Exportar respaldo cifrado</button><button class="btn" data-act="imp-cif">⬆️ Importar respaldo cifrado</button></div>
+ <div class="row" style="margin-top:8px"><button class="btn pri" data-act="exp-excel">📊 Descargar consolidado Excel</button></div> <div class="row" style="margin-top:8px"><button class="btn soft" data-act="exp-json">Exportar JSON simple</button><button class="btn soft" data-act="imp-json">Importar JSON</button></div></div>
+ <div class="row" style="margin-top:8px"><button class="btn pri" data-act="imp-excel">📊 Importar desde Excel</button></div>
   <div class="row" style="margin-top:8px"><button class="btn pri" data-act="exp-excel">📊 Descargar Excel</button><button class="btn pri" data-act="imp-excel" style="margin-left:8px">📊 Importar Excel</button></div> 
  <div class="row" style="margin-top:8px"><button class="btn soft" data-act="exp-json">Exportar JSON simple</button><button class="btn soft" data-act="imp-json">Importar JSON</button></div></div>
  <div class="card"><h3>☁️ Sincronización Firebase (PC ↔ celular)</h3>
@@ -980,7 +983,7 @@ async function importarExcel(){
    const data=await file.arrayBuffer();
    const wb=XLSX.read(data,{type:'array',cellDates:true});
    const resumen={deudas:[],cuentas:[],tarjetas:[],gastos:[]};
-   
+
    // Extraer Deudas
    if(wb.SheetNames.some(n=>n.toLowerCase().includes('deuda'))){
     const sheet=wb.Sheets[wb.SheetNames.find(n=>n.toLowerCase().includes('deuda'))];
@@ -997,9 +1000,9 @@ async function importarExcel(){
      let est='vigente';
      if(estado.includes('mor')||estado.includes('venc'))est='morosa';
      else if(estado.includes('pag')||estado.includes('cancel'))est='pagada';
-     
+
      const acreedor=db.acreedores.find(a=>a.nombre.toLowerCase().includes(String(r['Banco o Entidad']||r['Entidad']||'').toLowerCase().split(' ')[0]))?.id||db.acreedores[0].id;
-     
+
      resumen.deudas.push({
       id:uid(),nombre:String(nombre),tipoDeuda:r['Tipo']||'Tarjeta de Crédito',
       conTipo:'financiera',acreedorId:acreedor,persona:String(resp),
@@ -1009,7 +1012,7 @@ async function importarExcel(){
      });
     });
    }
-   
+
    // Extraer Cuentas
    if(wb.SheetNames.some(n=>n.toLowerCase().includes('cuenta')&&n.toLowerCase().includes('banc'))){
     const sheet=wb.Sheets[wb.SheetNames.find(n=>n.toLowerCase().includes('cuenta')&&n.toLowerCase().includes('banc'))];
@@ -1026,40 +1029,66 @@ async function importarExcel(){
      });
     });
    }
-   
-     // Extraer Tarjetas (Crédito, Débito y Prepago de todas las hojas)
-   const sheetsTarjetas = wb.SheetNames.filter(n => n.toLowerCase().includes('tarjeta'));
-   sheetsTarjetas.forEach(sheetName => {
-    const sheet = wb.Sheets[sheetName];
-    const rows = XLSX.utils.sheet_to_json(sheet, {defval:''});
-    rows.forEach(r => {
-     const numFis = String(r['Número'] || r['Numero tarjeta Fisica'] || '').replace(/\s/g,'');
-     const numVirt = String(r['Numero Tarjeta Virtual'] || '').replace(/\s/g,'');
-     if(!numFis && !numVirt) return;
-     
-     const tipoBase = String(r['Tipo'] || '').toLowerCase();
-     let tipoFis = 'Tarjeta Crédito', tipoVirt = 'Tarjeta Débito';
-     if(tipoBase.includes('débito') || tipoBase.includes('debito')) { tipoFis = 'Tarjeta Débito'; tipoVirt = 'Tarjeta Débito'; }
-     else if(tipoBase.includes('prepago')) { tipoFis = 'Tarjeta Prepago'; tipoVirt = 'Tarjeta Prepago'; }
 
-     if(numFis && numFis.length >= 4){
+   // Extraer Tarjetas
+   const sheetTarjetas=wb.SheetNames.find(n=>n.toLowerCase().includes('tarjeta')&&(n.toLowerCase().includes('crédito')||n.toLowerCase().includes('débito')));
+   if(sheetTarjetas){
+    const sheet=wb.Sheets[sheetTarjetas];
+    const rows=XLSX.utils.sheet_to_json(sheet,{defval:''});
+    rows.forEach(r=>{
+     const numFis=String(r['Número']||r['Numero tarjeta Fisica']||'').replace(/\s/g,'');
+     const numVirt=String(r['Numero Tarjeta Virtual']||'').replace(/\s/g,'');
+     if(!numFis&&!numVirt)return;
+
+     if(numFis&&numFis.length>4){
       resumen.tarjetas.push({
-       id:uid(), persona:String(r['Responsable'] || r['Titular'] || 'Ricardo'),
-       entidad:String(r['Banco o Entidad'] || r['Entidad'] || ''), tipo:tipoFis,
-       formato:'Física', numero:'•••• •••• •••• ' + numFis.slice(-4),
-       venc:String(r['Vencimiento'] || ''), archivada:false
+       id:uid(),persona:String(r['Responsable']||r['Titular']||'Ricardo'),
+       entidad:String(r['Banco o Entidad']||''),tipo:String(r['Tipo']||'Tarjeta Crédito'),
+       formato:'Física',numero:'•••• •••• •••• '+numFis.slice(-4),
+       venc:String(r['Vencimiento']||''),archivada:false
       });
      }
-     if(numVirt && numVirt.length >= 4){
+     if(numVirt&&numVirt.length>4){
       resumen.tarjetas.push({
-       id:uid(), persona:String(r['Responsable'] || r['Titular'] || 'Ricardo'),
-       entidad:String(r['Banco o Entidad'] || r['Entidad'] || ''), tipo:tipoVirt,
-       formato:'Virtual', numero:'•••• •••• •••• ' + numVirt.slice(-4),
-       venc:String(r['vencimiento tarjeta Virtual'] || r['Vencimiento'] || ''), archivada:false
+       id:uid(),persona:String(r['Responsable']||r['Titular']||'Ricardo'),
+       entidad:String(r['Banco o Entidad']||''),tipo:String(r['Tipo']||'Tarjeta Débito'),
+       formato:'Virtual',numero:'•••• •••• •••• '+numVirt.slice(-4),
+       venc:String(r['vencimiento tarjeta Virtual']||''),archivada:false
       });
      }
     });
-   });
+   }
+
+   // Mostrar vista previa
+   openModal('📊 Importar desde Excel',`
+    <p>Se encontraron:</p>
+    <ul style="list-style:none;padding:0">
+     <li>💳 <b>${resumen.deudas.length}</b> deudas</li>
+     <li>🏛️ <b>${resumen.cuentas.length}</b> cuentas bancarias</li>
+     <li>💳 <b>${resumen.tarjetas.length}</b> tarjetas</li>
+    </ul>
+    <p class="mut">¿Qué deseas hacer con estos datos?</p>
+    <div class="frm-btns">
+     <button type="button" class="btn pri" id="imp-reemp">🔄 Reemplazar todo</button>
+     <button type="button" class="btn" id="imp-fusion">➕ Agregar a existentes</button>
+     <button type="button" class="btn" data-act="close-modal">Cancelar</button>
+    </div>`);
+
+   $('#imp-reemp').onclick=()=>{
+    db.deudas=resumen.deudas;db.cuentas=resumen.cuentas;db.tarjetas=resumen.tarjetas;
+    save();closeModal();render();toast('✅ Datos reemplazados desde Excel');
+   };
+   $('#imp-fusion').onclick=()=>{
+    db.deudas=db.deudas.concat(resumen.deudas);
+    db.cuentas=db.cuentas.concat(resumen.cuentas);
+    db.tarjetas=db.tarjetas.concat(resumen.tarjetas);
+    save();closeModal();render();toast('✅ Datos agregados desde Excel');
+   };
+
+  }catch(e){console.error(e);toast('❌ Error al leer el Excel: '+e.message);}
+ };
+ inpF.click();
+}
 /* ============================== ACCIONES GLOBALES ============================== */
 document.addEventListener('click',e=>{
  const b=e.target.closest('[data-act]');if(!b)return;
