@@ -78,14 +78,32 @@ window.addEventListener('error',e=>{
 function histData(){const map={};const add=(m,k,v)=>{(map[m]??={ing:0,gas:0});map[m][k]+=Number(v)||0;};for(const g of db.ingresos)add(mkey(g.fecha),'ing',g.monto);for(const g of db.gastos)add(mkey(g.fecha),'gas',g.monto);for(const p of db.pagos)add(mkey(p.fecha),'gas',p.monto);return map;}
 function balanceActual(){const h=histData();let b=0;for(const m in h)b+=h[m].ing-h[m].gas;return b;}
 function renderDashboard(){
- const deudas=db.deudas.filter(d=>!d.archivada);const activas=deudas.filter(d=>d.estado!=='pagada');const morosas=activas.filter(d=>d.estado==='morosa');
- const totalDeuda=activas.reduce((s,d)=>s+(d.saldoTotal??d.montoTotal),0);const cuotaMes=activas.reduce((s,d)=>s+(minPago(d)||0),0);
- const m=today().slice(0,7);const ingMes=db.ingresos.filter(i=>mkey(i.fecha)===m).reduce((s,i)=>s+i.monto,0);const gasMes=db.gastos.filter(g=>mkey(g.fecha)===m).reduce((s,g)=>s+g.monto,0);const pagadoMes=db.pagos.filter(p=>mkey(p.fecha)===m).reduce((s,p)=>s+p.monto,0);const saldo=balanceActual();
+ const deudas=db.deudas.filter(d=>!d.archivada);
+ const activas=deudas.filter(d=>d.estado!=='pagada');
+ const morosas=activas.filter(d=>d.estado==='morosa');
+ const totalDeuda=activas.reduce((s,d)=>s+(d.saldoTotal??d.montoTotal),0);
+ const cuotaMes=activas.reduce((s,d)=>s+(minPago(d)||0),0);
+ const m=today().slice(0,7);
+ const ingMes=db.ingresos.filter(i=>mkey(i.fecha)===m).reduce((s,i)=>s+i.monto,0);
+ const gasMes=db.gastos.filter(g=>mkey(g.fecha)===m).reduce((s,g)=>s+g.monto,0);
+ const pagadoMes=db.pagos.filter(p=>mkey(p.fecha)===m).reduce((s,p)=>s+p.monto,0);
+ const saldo=balanceActual();
  const alertas=[];
  for(const d of morosas.sort((a,b)=>diasMora(b)-diasMora(a)))alertas.push(`<div class="alert-line r">🔴 <b>${esc(d.nombre)}</b> en mora: ${diasMora(d)} días</div>`);
  for(const d of activas.filter(d=>d.estado==='vigente'&&d.vencimiento)){const dd=days(today(),d.vencimiento);if(dd>=0&&dd<=(db.ajustes.diasAviso||5))alertas.push(`<div class="alert-line y">🟡 <b>${esc(d.nombre)}</b> vence en ${dd} día(s)</div>`);}
  if(!alertas.length)alertas.push('<div class="alert-line b">✨ Sin alertas pendientes.</div>');
- $('#ct-dashboard').innerHTML=`<div class="row between"><h2>🏠 Panel de control</h2><button class="btn pri" data-act="exp-excel">📊 Descargar Excel</button></div>
+ const agrupar=list=>{const g={};for(const d of list){const k=d.tipoDeuda||'Otro';(g[k]=g[k]||{min:0,fact:0,items:[]});g[k].min+=minPago(d);g[k].fact+=Number(d.montoFacturadoMes)||0;g[k].items.push(d);}return g;};
+ const gAll=agrupar(activas);
+ const totMin=activas.reduce((s,d)=>s+minPago(d),0);
+ const totFact=activas.reduce((s,d)=>s+(Number(d.montoFacturadoMes)||0),0);
+ const htmlCat=Object.entries(gAll).sort((a,b)=>b[1].min-a[1].min).map(([k,v])=>`<div class="list-item"><span><b>${esc(k)}</b> <span class="mut">(${v.items.length} deuda${v.items.length===1?'':'s'})</span></span><span class="row" style="gap:10px"><span class="mut">Mín: <b>${fmt(v.min)}</b></span><span class="mut">Fact: <b>${fmt(v.fact)}</b></span></span></div>`).join('')||'<p class="mut">Sin deudas activas.</p>';
+ const porVencer=activas.filter(d=>d.vencimiento&&!d.sinVencimiento&&days(today(),d.vencimiento)>=0&&days(today(),d.vencimiento)<=7);
+ const gVen=agrupar(porVencer);
+ const htmlVen=Object.entries(gVen).map(([k,v])=>`<div class="card" style="margin:6px 0;background:#f8fafc"><div class="row between"><b>${esc(k)}</b><span class="row" style="gap:10px"><span class="mut">Mín: <b>${fmt(v.min)}</b></span><span class="mut">Fact: <b>${fmt(v.fact)}</b></span></span></div>${v.items.sort((a,b)=>a.vencimiento<b.vencimiento?-1:1).map(d=>`<div class="list-item"><span>📅 ${dstr(d.vencimiento)} · ${esc(d.nombre)}</span><span class="row" style="gap:10px"><span class="mut">Mín: <b>${fmt(minPago(d))}</b></span><span class="mut">Fact: <b>${fmt(Number(d.montoFacturadoMes)||0)}</b></span></span></div>`).join('')}</div>`).join('')||'<p class="mut">No hay pagos por vencer en los próximos 7 días. 🎉</p>';
+ const ingList=db.ingresos.filter(i=>mkey(i.fecha)===m);
+ const htmlIng=ingList.map(i=>`<div class="list-item"><span>${dstr(i.fecha)} · ${esc(i.descripcion||'')} <span class="pill-persona">${esc(i.persona)}</span></span><b>${fmt(i.monto)}</b></div>`).join('')||'<p class="mut">Sin ingresos registrados este mes.</p>';
+ $('#ct-dashboard').innerHTML=`
+ <div class="row between"><h2>🏠 Panel de control</h2><button class="btn pri" data-act="exp-excel">📊 Descargar Excel</button></div>
  <div class="grid mini">
   <div class="card kpi ${totalDeuda>0?'warn':'ok'}"><div class="lbl">Deudas activas</div><div class="val">${fmt(totalDeuda)}</div><div class="mut">${activas.length} deudas · cuota ${fmt(cuotaMes)}</div></div>
   <div class="card kpi ${morosas.length?'warn':'ok'}"><div class="lbl">En mora</div><div class="val">${morosas.length}</div></div>
@@ -93,6 +111,9 @@ function renderDashboard(){
   <div class="card kpi"><div class="lbl">Gastos mes</div><div class="val">${fmt(gasMes+pagadoMes)}</div></div>
   <div class="card kpi ${saldo>=0?'ok':'warn'}"><div class="lbl">Balance</div><div class="val">${fmt(saldo)}</div></div>
  </div>
+ <div class="card"><h3>🧮 Deuda por categoría (activas)</h3>${htmlCat}<div class="list-item" style="border-top:1px solid #e2e8f0"><span><b>TOTAL</b></span><span class="row" style="gap:10px"><span>Pagos mínimos: <b>${fmt(totMin)}</b></span><span>Facturado: <b>${fmt(totFact)}</b></span></span></div></div>
+ <div class="card"><h3>⏰ Pagos por vencer (próximos 7 días)</h3>${htmlVen}</div>
+ <div class="card"><h3>💵 Ingresos del mes (${m})</h3>${htmlIng}<div class="list-item" style="border-top:1px solid #e2e8f0"><span><b>Total ingresos</b></span><b>${fmt(ingMes)}</b></div></div>
  <div class="card"><h3>🚨 Alertas</h3>${alertas.join('')}</div>`;
 }
 function selAcreedor(tipo,val){const opts=db.acreedores.filter(a=>a.tipo===tipo).map(a=>[a.id,a.nombre]);opts.push(['__new','➕ Añadir nuevo…']);return sel('f_acreedor','Acreedor',opts,val);}
