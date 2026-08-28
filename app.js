@@ -269,8 +269,7 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(
   case 'dup-mes':{const d=debtById(id);if(!d)break;const nv=addMonth(d.vencimiento||today(),1);const nd={...d,id:uid(),estado:'vigente',fechaPago:null,abonadoTotal:0,archivada:false,vencimiento:nv,sinVencimiento:false};const mesNuevo=new Date(nv+'T12:00').toLocaleDateString('es-CL',{month:'long'});nd.nombre=d.nombre.replace(/ — .*$/,'')+' — '+mesNuevo.charAt(0).toUpperCase()+mesNuevo.slice(1);const sh=d.saldoTotal??d.montoTotal;nd.montoTotal=sh;nd.saldoTotal=sh;db.deudas.push(nd);save();render();toast('🔁 Duplicada para '+mesNuevo);break;}
   case 'doc-deuda':docModal(id);break;
   case 'arch-deuda':archToggle(db.deudas,id,'Deuda');break;case 'rest-deuda':archToggle(db.deudas,id,'Deuda');break;
-  case 'del-deuda':confirmDlg('🗑️ Eliminar','¿Eliminar definitivamente?',()=>{docDel(id);db.deudas=db.deudas.filter(d=>d.id!==id);save();render();});break;
-  case 'filter-deuda':deudaFilter=id;renderDeudas();break;case 'toggle-arch-deudas':deudaVerArch=!deudaVerArch;renderDeudas();break;
+case 'del-deuda':confirmDlg('🗑️ Eliminar','¿Eliminar definitivamente?',()=>{const dd=debtById(id);if(dd&&dd.docPath)docDelete(dd.docPath);docDel(id);db.deudas=db.deudas.filter(d=>d.id!==id);save();render();});break;  case 'filter-deuda':deudaFilter=id;renderDeudas();break;case 'toggle-arch-deudas':deudaVerArch=!deudaVerArch;renderDeudas();break;
   case 'toggle-arch-pagos':pagoVerArch=!pagoVerArch;renderPagos();break;case 'arch-pago':archToggle(db.pagos,id,'Pago');break;case 'rest-pago':archToggle(db.pagos,id,'Pago');break;
   case 'del-pago':confirmDlg('🗑️','¿Eliminar pago?',()=>{db.pagos=db.pagos.filter(p=>p.id!==id);save();render();});break;
   case 'new-ac':acModal(id);break;case 'edit-ac':acModal(null,id);break;
