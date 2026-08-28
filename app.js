@@ -80,15 +80,24 @@ function idbOpen(){return new Promise((res,rej)=>{const r=indexedDB.open('billet
 async function docPut(id,blob){const d=await idbOpen();return new Promise((res,rej)=>{const t=d.transaction('docs','readwrite');t.objectStore('docs').put(blob,id);t.oncomplete=res;t.onerror=rej;});}
 async function docGet(id){const d=await idbOpen();return new Promise((res,rej)=>{const t=d.transaction('docs','readonly');const q=t.objectStore('docs').get(id);q.onsuccess=()=>res(q.result||null);q.onerror=rej;});}
 async function docDel(id){const d=await idbOpen();return new Promise((res,rej)=>{const t=d.transaction('docs','readwrite');t.objectStore('docs').delete(id);t.oncomplete=res;t.onerror=rej;});}
+async function stMod(){return await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js');}
+async function docUpload(id,file){const m=await stMod();const r=m.ref(m.getStorage(fb.app),'docs/'+fb.user.uid+'/'+id+'.pdf');await m.uploadBytes(r,file,{contentType:'application/pdf'});return r.fullPath;}
+async function docUrl(path){const m=await stMod();return await m.getDownloadURL(m.ref(m.getStorage(fb.app),path));}
+async function docDelete(path){try{const m=await stMod();await m.deleteObject(m.ref(m.getStorage(fb.app),path));}catch(e){}}
+function openViewer(d,u){openModal('📄 '+esc(d.nombre),`<iframe src="${u}" style="width:100%;height:65vh;border:0;border-radius:10px;background:#fff"></iframe><div class="frm-btns"><button class="btn" id="doc-back">⬅️ Volver</button><button class="btn" data-act="close-modal">Cerrar</button></div>`);$('#doc-back').onclick=()=>docModal(d.id);}
 async function docModal(id){
  const d=debtById(id);if(!d)return;
- const blob=await docGet(id);
- openModal('📄 Estado de cuenta: '+esc(d.nombre),`<p class="mut">${blob?'✅ Documento adjunto ('+Math.round(blob.size/1024)+' KB)':'⚪ Sin documento adjunto'}</p>
- <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn pri" id="doc-ver" ${blob?'':'disabled'}>👁️ Ver</button><button class="btn" id="doc-sub">📎 ${blob?'Reemplazar':'Subir PDF'}</button><button class="btn warn" id="doc-del" ${blob?'':'disabled'}>🗑️ Eliminar</button><button class="btn" data-act="close-modal">Cerrar</button></div>
- <p class="mut" style="margin-top:8px">🔒 El documento se guarda solo en este dispositivo.</p>`);
- $('#doc-ver').onclick=async()=>{const b=await docGet(id);if(!b)return toast('❌ Sin documento');const u=URL.createObjectURL(b);openModal('📄 '+esc(d.nombre),`<iframe src="${u}" style="width:100%;height:65vh;border:0;border-radius:10px;background:#fff"></iframe><div class="frm-btns"><button class="btn" id="doc-back">⬅️ Volver</button><button class="btn" data-act="close-modal">Cerrar</button></div>`);$('#doc-back').onclick=()=>docModal(id);};
- $('#doc-sub').onclick=()=>{const i=document.createElement('input');i.type='file';i.accept='application/pdf,.pdf';i.onchange=async()=>{const f=i.files[0];if(!f)return;if(f.type!=='application/pdf'&&!f.name.toLowerCase().endsWith('.pdf'))return toast('⚠️ Solo se aceptan PDF');await docPut(id,f);d.docPdf=true;save();toast('✅ Documento guardado');docModal(id);};i.click();};
- $('#doc-del').onclick=async()=>{await docDel(id);d.docPdf=false;save();toast('🗑️ Documento eliminado');docModal(id);};
+ const enNube=!!(fb.user&&fb.loaded&&d.docPath);
+ const blob=enNube?null:await docGet(id);
+ const tiene=enNube||!!blob;
+ openModal('📄 Estado de cuenta: '+esc(d.nombre),`<p class="mut">${enNube?'☁️ En la nube (disponible en todos los equipos)':blob?'📱 Solo en este dispositivo':'⚪ Sin documento adjunto'}</p>
+ <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn pri" id="doc-ver" ${tiene?'':'disabled'}>👁️ Ver</button><button class="btn" id="doc-sub">📎 ${tiene?'Reemplazar':'Subir PDF'}</button><button class="btn warn" id="doc-del" ${tiene?'':'disabled'}>🗑️ Eliminar</button><button class="btn" data-act="close-modal">Cerrar</button></div>
+ <p class="mut" style="margin-top:8px">${fb.user&&fb.loaded?'☁️ Los PDF se guardan en la nube para todos tus equipos.':'⚠️ Inicia sesión en Firebase para guardar los PDF en la nube.'}</p>`);
+ $('#doc-ver').onclick=async()=>{try{if(enNube){openViewer(d,await docUrl(d.docPath));}else{const b=await docGet(id);if(!b)return toast('❌ Sin documento');openViewer(d,URL.createObjectURL(b));}}catch(e){toast('❌ No se pudo abrir el documento');}};
+ $('#doc-sub').onclick=()=>{const i=document.createElement('input');i.type='file';i.accept='application/pdf,.pdf';i.onchange=async()=>{const f=i.files[0];if(!f)return;if(f.type!=='application/pdf'&&!f.name.toLowerCase().endsWith('.pdf'))return toast('⚠️ Solo se aceptan PDF');await docPut(id,f);d.docPdf=true;save();
+  if(fb.user&&fb.loaded){try{d.docPath=await docUpload(id,f);save();toast('☁️ PDF subido a la nube');}catch(e){d.docPath=null;toast('📱 PDF guardado solo en este equipo');}}else toast('📱 PDF guardado en este equipo');
+  docModal(id);};i.click();};
+ $('#doc-del').onclick=async()=>{if(d.docPath)await docDelete(d.docPath);await docDel(id);d.docPath=null;d.docPdf=false;save();toast('🗑️ Documento eliminado');docModal(id);};
 }
 /* ============================== VISTAS ============================== */
 function histData(){const map={};const add=(m,k,v)=>{(map[m]??={ing:0,gas:0});map[m][k]+=Number(v)||0;};for(const g of db.ingresos)add(mkey(g.fecha),'ing',g.monto);for(const g of db.gastos)add(mkey(g.fecha),'gas',g.monto);for(const p of db.pagos)add(mkey(p.fecha),'gas',p.monto);return map;}
@@ -133,8 +142,8 @@ function bindDeudaForm(orig){const f=$('#frm_deuda');
  if(!v.nombre)return toast('⚠️ Escribe un nombre');
  if(v.acreedorId==='__new'){const nom=prompt('Nombre del nuevo acreedor:');if(!nom)return toast('⚠️ Escribe un nombre');const na={id:uid(),tipo:v.conTipo,nombre:nom.trim(),nota:''};db.acreedores.push(na);v.acreedorId=na.id;}
  let id=orig.id;if(id){Object.assign(debtById(id),v);}else{id=uid();db.deudas.push(Object.assign({id,pagadoHistorico:0,abonadoTotal:0,archivada:false},v));}
- const pf=$('#f_pdf')?$('#f_pdf').files[0]:null;if(pf){if(pf.type!=='application/pdf'&&!pf.name.toLowerCase().endsWith('.pdf'))toast('⚠️ El documento debe ser PDF');else{docPut(id,pf);const dd=debtById(id);if(dd)dd.docPdf=true;}}
- save();closeModal();render();toast('💾 Deuda guardada');};}
+const pf=$('#f_pdf')?$('#f_pdf').files[0]:null;if(pf){if(pf.type!=='application/pdf'&&!pf.name.toLowerCase().endsWith('.pdf'))toast('⚠️ El documento debe ser PDF');else{const dd=debtById(id);if(dd){docPut(id,pf);dd.docPdf=true;if(fb.user&&fb.loaded){docUpload(id,pf).then(p=>{dd.docPath=p;save();toast('☁️ PDF subido a la nube');}).catch(()=>toast('📱 PDF guardado en este equipo'));}else toast('📱 PDF guardado en este equipo');}}}
+                      save();closeModal();render();toast('💾 Deuda guardada');};}
 function openDeudaModal(id){const d=id?debtById(id):{};openModal(id?'✏️ Editar deuda':'➕ Nueva deuda',formDeuda(d));bindDeudaForm(d);}
 function openPagoModal(id){const d=debtById(id);if(!d)return;const min=d.sinVencimiento?cicloRestante(d):minPago(d);
  openModal(`💰 Pago: ${esc(d.nombre)}`,`<div class="card" style="background:#f8fafc"><div class="list-item"><span>Facturado mes</span><b>${fmt(d.montoFacturadoMes)}</b></div><div class="list-item"><span>Pago mínimo</span><b>${fmt(min)}</b></div><div class="list-item"><span>Saldo pago mínimo</span><b>${fmt(cicloRestante(d))}</b></div><div class="list-item"><span>Saldo facturado</span><b>${fmt(saldoFacturado(d))}</b></div><div class="list-item"><span>Saldo pendiente</span><b>${fmt(saldoTotalPendiente(d))}</b></div></div><form id="frm_pago"><div class="row2">${inp('p_fecha','Fecha',today(),'date')}${inp('p_monto','Monto ($)','','number','required min="1"')}</div><div class="frm-btns"><button class="btn pri" type="submit">✅ Confirmar</button><button class="btn" type="button" data-act="close-modal">Cancelar</button></div></form>`);
