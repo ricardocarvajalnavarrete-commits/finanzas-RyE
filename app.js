@@ -559,30 +559,7 @@ async function conversorImgPDF(){
  <label class="fld"><span>Imágenes</span><input type="file" id="img2pdf-files" accept="image/*" multiple></label>
  <div id="img2pdf-prev" class="row" style="gap:6px;flex-wrap:wrap;margin:8px 0"></div>
  <div class="frm-btns"><button class="btn pri" id="img2pdf-dl">⬇️ Descargar PDF</button><button class="btn" data-act="close-modal">Cerrar</button></div>`);
- $('#img2pdf-files').onchange=e=>{const prev=$('#img2pdf-prev');prev.innerHTML='';[...e.target.files].forEach(f=>{const im=document.createElement('img');im.src=URL.createObjectURL(f);im.style.cssText='width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid #cbd5e1';prev.appendChild(im);});};
- $('#img2pdf-dl').onclick=async()=>{
-  const files=[...$('#img2pdf-files').files];
-  if(!files.length)return toast('⚠️ Adjunta al menos una imagen');
-  toast('⏳ Generando PDF…');
-  const {jsPDF}=window.jspdf;let doc=null;
-  for(const f of files){
-   try{
-    const dataUrl=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsDataURL(f);});
-    const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=dataUrl;});
-    const fmt=(f.type==='image/png')?'PNG':'JPEG';
-    const orient=img.width>img.height?'landscape':'portrait';
-    if(!doc)doc=new jsPDF({orientation:orient,unit:'mm',format:'a4'});else doc.addPage('a4',orient);
-    const pw=doc.internal.pageSize.getWidth(),ph=doc.internal.pageSize.getHeight(),m=8;
-    const ratio=Math.min((pw-2*m)/img.width,(ph-2*m)/img.height);
-    const w=img.width*ratio,h=img.height*ratio;
-    doc.addImage(dataUrl,fmt,(pw-w)/2,(ph-h)/2,w,h);
-   }catch(e){toast('⚠️ No se pudo leer '+f.name);}
-  }
-  if(!doc)return toast('❌ No se pudo generar el PDF');
-  doc.save('convertido_'+today()+'.pdf');
-  toast('⬇️ PDF descargado: ya puedes adjuntarlo');
- };
-}
+ $('#img2pdf-files').onchange=e=>{const prev=$('#img2pdf-prev');prev.innerHTML='';[...e.target.files].forEach(f=>{const im=document.createElement('img');im.src=URL.createObjectURL(f);
 /* ============================== IMPORTAR EXCEL ============================== */
 function parseFecha(v){if(!v)return null;if(v instanceof Date&&!isNaN(v))return v.toISOString().slice(0,10);const s=String(v).trim();let m=s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);if(m){let y=+m[3];if(y<100)y+=2000;return y+'-'+String(+m[2]).padStart(2,'0')+'-'+String(+m[1]).padStart(2,'0');}m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);if(m)return m[1]+'-'+String(+m[2]).padStart(2,'0')+'-'+String(+m[3]).padStart(2,'0');return null;}
 async function importarExcel(){await cargarXLSX();const inpF=document.createElement('input');inpF.type='file';inpF.accept='.xlsx,.xls';inpF.onchange=async()=>{const file=inpF.files[0];if(!file)return;toast('⏳ Leyendo…');try{const wb=XLSX.read(await file.arrayBuffer(),{type:'array'});const res={deudas:[],cuentas:[],tarjetas:[]};const num=v=>Number(String(v).replace(/[^0-9.-]/g,''))||0;
