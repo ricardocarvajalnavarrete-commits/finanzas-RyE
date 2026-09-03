@@ -387,8 +387,47 @@ function openPagoModal(id){const d=debtById(id);if(!d)return;const min=d.sinVenc
 function renderDeudas(){const orden={morosa:0,vigente:1,pagada:2};let list=db.deudas.filter(d=>deudaVerArch?d.archivada:!d.archivada);if(deudaFilter!=='todas')list=list.filter(d=>d.estado===deudaFilter);list.sort((a,b)=>orden[a.estado]-orden[b.estado]||(diasMora(b)||0)-(diasMora(a)||0));
  const cards=list.map(d=>{const ac=acById(d.acreedorId);const rest=cicloRestante(d);return `<div class="card debt ${d.estado==='morosa'?'m':d.estado==='pagada'?'p':''}"><div class="top"><span class="name">${esc(d.nombre)}</span><span class="row" style="gap:6px"><span class="badge b-${d.estado}">${d.estado.toUpperCase()}</span>${moraChip(d)}</span></div><div class="mut">${esc(d.persona)} · ${esc(d.tipoDeuda)} · ${esc(ac?ac.nombre:'—')}</div><div class="data"><span>💵 Total: <b>${fmt(d.montoTotal)}</b></span><span>📉 Saldo: <b>${fmt(d.saldoTotal??d.montoTotal)}</b></span><span>🧾 Facturado: <b>${fmt(d.montoFacturadoMes)}</b></span><span>⬇️ Mínimo: <b>${fmt(minPago(d))}</b></span><span>📅 Vence: <b>${d.sinVencimiento?'Sin venc.':dstr(d.vencimiento)}</b></span><span>👛 Saldo mín.: ${rest<=0?'<span class="al-dia">Al Día ✅</span>':'<b class="err">'+fmt(rest)+'</b>'}</span><span>💼 Pendiente: <b>${fmt(saldoTotalPendiente(d))}</b></span></div><div class="acts">${d.estado!=='pagada'&&!d.archivada?`<button class="btn pri mini" data-act="pago" data-id="${d.id}">💰 Pago</button>`:''}${!d.archivada?`<button class="btn mini" data-act="edit-deuda" data-id="${d.id}">✏️</button><button class="btn mini" data-act="dup-mes" data-id="${d.id}" title="Duplicar p/ próximo mes">🔁 +1 mes</button><button class="btn mini" data-act="doc-deuda" data-id="${d.id}" title="Estado de cuenta PDF">${docIcon(!!(d.docPdf||d.docPath))}</button><button class="btn mini" data-act="comp-deuda" data-id="${d.id}" title="Comprobante de pago PDF">${compIcon(!!(d.compPdf||d.compPath))}</button><button class="btn mini" data-act="arch-deuda" data-id="${d.id}">📦</button>`:`<button class="btn mini" data-act="rest-deuda" data-id="${d.id}">♻️</button><button class="btn mini" data-act="doc-deuda" data-id="${d.id}" title="Estado de cuenta PDF">${docIcon(!!(d.docPdf||d.docPath))}</button><button class="btn mini" data-act="comp-deuda" data-id="${d.id}" title="Comprobante de pago PDF">${compIcon(!!(d.compPdf||d.compPath))}</button><button class="btn warn mini" data-act="del-deuda" data-id="${d.id}">🗑️</button>`}</div></div>`;}).join('');
  $('#ct-deudas').innerHTML=`<div class="row between"><h2>💳 Deudas</h2><span class="row"><button class="btn" data-act="img2pdf" title="Convertir imagen a PDF">🖼️→</button><button class="btn ${deudaVerArch?'soft':'pri'}" data-act="toggle-arch-deudas">📦</button><button class="btn pri" data-act="new-deuda">➕ Nueva</button></span></div><div class="filters">${['todas','vigente','morosa','pagada'].map(f=>`<button class="nbtn ${deudaFilter===f?'on':''}" data-act="filter-deuda" data-id="${f}">${f==='todas'?'Todas':f+'s'}</button>`).join('')}</div>${cards||'<div class="card"><p class="mut">Sin deudas.</p></div>'}`;}
+function openEditPago(id){
+ const p=db.pagos.find(x=>x.id===id);if(!p)return;
+ openModal('✏️ Editar pago: '+esc(p.deuda),`<form id="frm_ep">${inp('ep_fecha','Fecha',p.fecha,'date')}${inp('ep_monto','Monto ($)',p.monto,'number')}${inp('ep_nota','Nota adicional (opcional)',p.nota||'')}<div class="frm-btns"><button class="btn pri" type="submit">💾 Guardar</button><button class="btn" type="button" data-act="close-modal">Cancelar</button></div></form>`);
+ $('#frm_ep').onsubmit=e=>{
+  e.preventDefault();
+  const fecha=$('#ep_fecha').value,monto=Math.round(Number($('#ep_monto').value)||0),nota=$('#ep_nota').value.trim();
+  if(!fecha||monto<=0)return toast('⚠️ Revisa fecha y monto');
+  const d=debtById(p.deudaId);
+  const aplicar=extraMode=>{
+   const oldDesc=p.montoDescontado??p.monto;
+   const fact=d?Number(d.montoFacturadoMes)||0:0;
+   const exceso=(fact>0&&monto>fact)?monto-fact:0;
+   const noDesc=(extraMode==='gastos')?exceso:0;
+   const desc=Math.max(0,monto-noDesc);
+   const min=d?(d.sinVencimiento?cicloRestante(d):minPago(d)):0;
+   let tipo;
+   if(exceso>0&&extraMode==='gastos')tipo='PAGO FACTURADO + GASTOS/INTERESES';
+   else if(exceso>0&&extraMode==='abono')tipo='PAGO FACTURADO + ABONO';
+   else if(d&&monto<min)tipo='ABONO';
+   else if(fact>0&&monto>=fact)tipo='PAGO FACTURADO';
+   else tipo=p.tipo;
+   p.fecha=fecha;p.monto=monto;p.nota=nota;p.tipo=tipo;p.montoDescontado=desc;p.excesoNoDescontado=noDesc;p.extraMode=extraMode||'';
+   if(d){
+    d.saldoTotal=Math.max(0,(d.saldoTotal??d.montoTotal)+(oldDesc-desc));
+    d.pagadoHistorico=Math.max(0,(d.pagadoHistorico||0)+(desc-oldDesc));
+    const noAbono=db.pagos.filter(x=>x.deudaId===d.id&&x.tipo!=='ABONO').sort((a,b)=>a.fecha<b.fecha?-1:1);
+    if(noAbono.length){d.estado='pagada';d.fechaPago=noAbono[noAbono.length-1].fecha;}
+    else if(!d.sinVencimiento&&d.vencimiento){d.estado=(d.vencimiento<today()&&abonosCiclo(d)<minPago(d))?'morosa':'vigente';d.fechaPago=null;}
+   }
+   save();closeModal();render();toast('✅ Pago actualizado');
+  };
+  const fact=d?Number(d.montoFacturadoMes)||0:0;
+  if(fact>0&&monto>fact){
+   openModal('⚠️ Pago superior al monto facturado',`<p>Nuevo monto <b>${fmt(monto)}</b> vs facturado <b>${fmt(fact)}</b>. Diferencia: <b>${fmt(monto-fact)}</b>.</p><div class="frm-btns"><button class="btn warn" id="op-g2">Gastos / intereses</button><button class="btn pri" id="op-a2">Abono a deuda</button><button class="btn" data-act="close-modal">Cancelar</button></div>`);
+   $('#op-g2').onclick=()=>aplicar('gastos');
+   $('#op-a2').onclick=()=>aplicar('abono');
+  }else aplicar(p.extraMode||'');
+ };
+}
 function renderPagos(){const list=db.pagos.filter(p=>pagoVerArch?p.archivado:!p.archivado);
- $('#ct-pagos').innerHTML=`<div class="row between"><h2>🧾 Pagos</h2><span class="row"><button class="btn" data-act="img2pdf" title="Convertir imagen a PDF">🖼️→📄</button><button class="btn ${pagoVerArch?'soft':'pri'}" data-act="toggle-arch-pagos">📦</button></span></div><div class="card tblwrap"><table><tr><th>Fecha</th><th>Deuda</th><th>Monto</th><th>Tipo</th><th></th></tr>${list.map(p=>`<tr><td>${dstr(p.fecha)}</td><td>${esc(p.deuda)}${p.nota?'<br><span class="mut">📝 '+esc(p.nota)+'</span>':''}</td><td><b>${fmt(p.monto)}</b>${p.excesoNoDescontado?'<br><span class="mut">Descuenta: '+fmt(p.montoDescontado||0)+'<br>No descuenta: '+fmt(p.excesoNoDescontado)+'</span>':''}</td><td>${p.tipo}</td><td>${p.archivado?`<button class="btn mini" data-act="rest-pago" data-id="${p.id}">♻️</button>`:`<button class="btn mini" data-act="arch-pago" data-id="${p.id}">📦</button>`}</td></tr>`).join('')}</table>${list.length?'':'<p class="mut">Sin pagos.</p>'}</div>`;}
+ $('#ct-pagos').innerHTML=`<div class="row between"><h2>🧾 Pagos</h2><span class="row"><button class="btn" data-act="img2pdf" title="Convertir imagen a PDF">🖼️→📄</button><button class="btn ${pagoVerArch?'soft':'pri'}" data-act="toggle-arch-pagos">📦</button></span></div><div class="card tblwrap"><table><tr><th>Fecha</th><th>Deuda</th><th>Monto</th><th>Tipo</th><th></th></tr>${list.map(p=>`<tr><td>${dstr(p.fecha)}</td><td>${esc(p.deuda)}${p.nota?'<br><span class="mut">📝 '+esc(p.nota)+'</span>':''}</td><td><b>${fmt(p.monto)}</b>${p.excesoNoDescontado?'<br><span class="mut">Descuenta: '+fmt(p.montoDescontado||0)+'<br>No descuenta: '+fmt(p.excesoNoDescontado)+'</span>':''}</td><td>${p.tipo}</td><td><button class="btn mini" data-act="edit-pago" data-id="${p.id}">✏️</button>${p.archivado?`<button class="btn mini" data-act="rest-pago" data-id="${p.id}">♻️</button>`:`<button class="btn mini" data-act="arch-pago" data-id="${p.id}">📦</button>`}</td></tr>`).join('')}</table>${list.length?'':'<p class="mut">Sin pagos.</p>'}</div>`;}
 function renderAcreedores(){$('#ct-acreedores').innerHTML=`<h2>🏦 Acreedores</h2>`+[['financiera','🏦 Financieras'],['empresa','🏢 Empresas'],['persona','👤 Personas'],['otro','📌 Otros']].map(([t,l])=>{const list=db.acreedores.filter(a=>a.tipo===t);return `<div class="card"><div class="row between"><h3>${l}</h3><button class="btn pri mini" data-act="new-ac" data-id="${t}">➕</button></div>${list.map(a=>`<div class="list-item"><span><b>${esc(a.nombre)}</b>${a.codigoCliente?'<br><span class="mut">Código cliente: '+esc(a.codigoCliente)+'</span>':''}</span><span class="row"><button class="btn mini" data-act="edit-ac" data-id="${a.id}">✏️</button><button class="btn warn mini" data-act="del-ac" data-id="${a.id}">🗑️</button></span></div>`).join('')||'<p class="mut">Sin registros.</p>'}</div>`;}).join('');}
 function acModal(tipo,id){
  const a=id?acById(id):{tipo,nombre:'',nota:'',codigoCliente:''};
@@ -568,7 +607,7 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(
   case 'arch-deuda':archToggle(db.deudas,id,'Deuda');break;case 'rest-deuda':archToggle(db.deudas,id,'Deuda');break;
   case 'del-deuda':confirmDlg('🗑️ Eliminar','¿Eliminar definitivamente?',()=>{const dd=debtById(id);if(dd){const otroD=db.deudas.find(x=>x.id!==id&&x.docPath&&x.docPath===dd.docPath);const otroC=db.deudas.find(x=>x.id!==id&&x.compPath&&x.compPath===dd.compPath);if(dd.docPath&&!otroD)docDelete(dd.docPath);if(dd.compPath&&!otroC)compDelete(dd.compPath);}docDel(id);docDel(id+'_comp');db.deudas=db.deudas.filter(d=>d.id!==id);save();render();});break;
   case 'filter-deuda':deudaFilter=id;renderDeudas();break;case 'toggle-arch-deudas':deudaVerArch=!deudaVerArch;renderDeudas();break;
-  case 'toggle-arch-pagos':pagoVerArch=!pagoVerArch;renderPagos();break;case 'arch-pago':archToggle(db.pagos,id,'Pago');break;case 'rest-pago':archToggle(db.pagos,id,'Pago');break;
+  case 'toggle-arch-pagos':pagoVerArch=!pagoVerArch;renderPagos();break;case 'edit-pago':openEditPago(id);break;case 'arch-pago':archToggle(db.pagos,id,'Pago');break;case 'rest-pago':archToggle(db.pagos,id,'Pago');break;
   case 'del-pago':confirmDlg('🗑️','¿Eliminar pago?',()=>{db.pagos=db.pagos.filter(p=>p.id!==id);save();render();});break;
   case 'new-ac':acModal(id);break;case 'edit-ac':acModal(null,id);break;
   case 'del-ac':confirmDlg('🗑️','¿Eliminar acreedor?',()=>{db.acreedores=db.acreedores.filter(a=>a.id!==id);save();render();});break;
