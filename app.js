@@ -51,7 +51,10 @@ function saldoTotalPendiente(d){const pagado=db.pagos.filter(p=>p.deudaId===d.id
 function diasMora(d){return (d.estado==='morosa'&&d.vencimiento)?Math.max(0,days(d.vencimiento,today())):null;}
 function moraChip(d){const n=diasMora(d);if(n===null)return '';const cls=n<30?'mora-y':n<60?'mora-o':'mora-r';return `<span class="mora ${cls}">⏱ ${n} día${n===1?'':'s'} de mora</span>`;}
 function evaluarDeudas(){let cambio=false;for(const d of db.deudas){if(d.estado==='pagada'||d.sinVencimiento||!d.vencimiento)continue;const vencido=d.vencimiento<today();if(vencido&&abonosCiclo(d)<minPago(d)&&d.estado!=='morosa'){d.estado='morosa';cambio=true;}else if(!vencido&&d.estado==='morosa'){d.estado='vigente';cambio=true;}}if(cambio){_auto=true;save();_auto=false;}}
-function registrarPago(id,fecha,monto,nota,extraMode){
+function attachCompPago(p,file){docPut(p.id+'_comp',file);p.compPdf=true;if(fb.user&&fb.loaded){compUpload(p.id,file).then(path=>{p.compPath=path;save();toast('☁️ Comprobante subido a la nube');}).catch(()=>{p.compPath=null;save();toast('📱 Comprobante en este equipo');});}else toast('📱 Comprobante en este equipo');}
+async function removeCompPago(p){if(p.compPath)await compDelete(p.compPath);await docDel(p.id+'_comp');p.compPath=null;p.compPdf=false;save();}
+async function migrarComprobantes(){let cambio=false;for(const d of db.deudas){if(!(d.compPdf||d.compPath))continue;const ps=db.pagos.filter(p=>p.deudaId===d.id).sort((a,b)=>a.fecha<b.fecha?1:-1);if(!ps.length)continue;const p=ps[0];const blob=await docGet(d.id+'_comp');if(blob){await docPut(p.id+'_comp',blob);await docDel(d.id+'_comp');}p.compPdf=true;if(d.compPath&&!p.compPath)p.compPath=d.compPath;d.compPdf=false;d.compPath=null;cambio=true;}if(cambio){_auto=true;save();_auto=false;}}
+function registrarPago(id,fecha,monto,nota,extraMode,file){
  const d=debtById(id);if(!d)return;
  monto=Math.round(Number(monto));
  const min=d.sinVencimiento?cicloRestante(d):minPago(d);
@@ -59,7 +62,6 @@ function registrarPago(id,fecha,monto,nota,extraMode){
  const excesoFact=(fact>0&&monto>fact)?monto-fact:0;
  const excesoNoDescontado=extraMode==='gastos'?excesoFact:0;
  const montoDescontado=Math.max(0,monto-excesoNoDescontado);
-
  let tipo;
  if(excesoFact>0&&extraMode==='gastos')tipo='PAGO FACTURADO + GASTOS/INTERESES';
  else if(excesoFact>0&&extraMode==='abono')tipo='PAGO FACTURADO + ABONO';
@@ -67,44 +69,22 @@ function registrarPago(id,fecha,monto,nota,extraMode){
  else if(fact>0&&monto>=fact)tipo='PAGO FACTURADO';
  else if(monto>min)tipo='PAGO SUPERIOR AL PAGO MINIMO E INFERIOR AL PAGO MENSUAL';
  else tipo='PAGO MINIMO';
-
- db.pagos.unshift({
-  id:uid(),
-  deudaId:d.id,
-  deuda:d.nombre,
-  persona:d.persona,
-  fecha,
-  monto,
-  tipo,
-  nota:nota||'',
-  montoDescontado,
-  excesoNoDescontado,
-  extraMode:extraMode||'',
-  archivado:false
- });
-
+ const p={id:uid(),deudaId:d.id,deuda:d.nombre,persona:d.persona,fecha,monto,tipo,nota:nota||'',montoDescontado,excesoNoDescontado,extraMode:extraMode||'',compPdf:false,compPath:null,archivado:false};
+ db.pagos.unshift(p);
  d.pagadoHistorico=(d.pagadoHistorico||0)+montoDescontado;
  d.saldoTotal=Math.max(0,(d.saldoTotal??d.montoTotal)-montoDescontado);
-
  if(tipo==='ABONO'){
-  if(d.sinVencimiento){
-   d.abonadoTotal=(d.abonadoTotal||0)+montoDescontado;
-  }else{
-   d.estado=(d.vencimiento&&d.vencimiento<today()&&abonosCiclo(d)<minPago(d))?'morosa':'vigente';
-  }
- }else{
-  d.estado='pagada';
-  d.fechaPago=fecha;
- }
-
+  if(d.sinVencimiento){d.abonadoTotal=(d.abonadoTotal||0)+montoDescontado;}
+  else{d.estado=(d.vencimiento&&d.vencimiento<today()&&abonosCiclo(d)<minPago(d))?'morosa':'vigente';}
+ }else{d.estado='pagada';d.fechaPago=fecha;}
  save();
+ if(file)attachCompPago(p,file);
  render();
-
  if(excesoNoDescontado>0)toast('✅ Pago registrado. Exceso no descontado: '+fmt(excesoNoDescontado));
  else tipo==='ABONO'?toast('🧾 Abono registrado'):toast('✅ Pago registrado: '+tipo);
 }
 
-function confirmarPago(id,fecha,monto,nota){
+function confirmarPago(id,fecha,monto,nota,file){
  const d=debtById(id);
  const min=d.sinVencimiento?cicloRestante(d):minPago(d);
  const fact=Number(d.montoFacturadoMes)||0;
@@ -125,8 +105,8 @@ function confirmarPago(id,fecha,monto,nota){
     <button class="btn" data-act="close-modal">Cancelar</button>
    </div>
   `);
-  $('#op-gastos').onclick=()=>{closeModal();registrarPago(id,fecha,monto,nota,'gastos');};
-  $('#op-abono').onclick=()=>{closeModal();registrarPago(id,fecha,monto,nota,'abono');};
+  $('#op-gastos').onclick=()=>{closeModal();registrarPago(id,fecha,monto,nota,'gastos',file);};
+  $('#op-abono').onclick=()=>{closeModal();registrarPago(id,fecha,monto,nota,'abono',file);};
   return;
  }
 
@@ -134,10 +114,11 @@ function confirmarPago(id,fecha,monto,nota){
   showAlert(
    '⚠️ El pago se considerará un ABONO',
    `El monto ingresado (${fmt(monto)}) es inferior al pago mínimo (${fmt(min)}). Este pago se registrará como un <b>abono a la deuda</b>.`,
-   ()=>registrarPago(id,fecha,monto,nota)
+   ()=>registrarPago(id,fecha,monto,nota,file)
   );
- }else registrarPago(id,fecha,monto,nota);
-}function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.remove('hidden');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.add('hidden'),2600);}
+ }else registrarPago(id,fecha,monto,nota,file);
+}
+function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.remove('hidden');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.add('hidden'),2600);}
 function openModal(title,body){$('#modal-root').innerHTML=`<div class="modal-back" id="mb"><div class="modal"><div class="row between"><h3>${title}</h3><button class="btn icon" data-act="close-modal">✕</button></div>${body}</div></div>`;$('#mb').addEventListener('click',e=>{if(e.target.id==='mb')closeModal();});}
 function closeModal(){$('#modal-root').innerHTML='';}
 function showAlert(title,msg,onOk){openModal(title,`<p>${msg}</p><div class="frm-btns"><button class="btn pri" id="al-ok">OK</button></div>`);$('#al-ok').onclick=()=>{closeModal();onOk&&onOk();};}
@@ -217,17 +198,17 @@ async function docModal(id){
  $('#doc-sub').onclick=()=>{const i=document.createElement('input');i.type='file';i.accept='application/pdf,.pdf';i.onchange=async()=>{const f=i.files[0];if(!f)return;if(f.type!=='application/pdf'&&!f.name.toLowerCase().endsWith('.pdf'))return toast('⚠️ Solo PDF');await docPut(id,f);d.docPdf=true;save();if(fb.user&&fb.loaded){try{d.docPath=await docUpload(id,f);save();toast('☁️ PDF subido a la nube');}catch(e){d.docPath=null;toast('📱 PDF en este equipo');}}else toast('📱 PDF en este equipo');docModal(id);};i.click();};
  $('#doc-del').onclick=async()=>{if(d.docPath)await docDelete(d.docPath);await docDel(id);d.docPath=null;d.docPdf=false;save();toast('🗑️ Documento eliminado');docModal(id);};
 }
-async function compModal(id){
- const d=debtById(id);if(!d)return;
- const enNube=!!(fb.user&&fb.loaded&&d.compPath);
- const blob=enNube?null:await docGet(id+'_comp');
+async function compModal(pid){
+ const p=db.pagos.find(x=>x.id===pid);if(!p)return;
+ const enNube=!!(fb.user&&fb.loaded&&p.compPath);
+ const blob=enNube?null:await docGet(pid+'_comp');
  const tiene=enNube||!!blob;
- openModal('🧾 Comprobante de pago: '+esc(d.nombre),`<p class="mut">${enNube?'☁️ En la nube (todos los equipos)':blob?'📱 Solo en este dispositivo':'⚪ Sin comprobante adjunto'}</p>
+ openModal('🧾 Comprobante: '+esc(p.deuda)+' ('+dstr(p.fecha)+')',`<p class="mut">${enNube?'☁️ En la nube (todos los equipos)':blob?'📱 Solo en este dispositivo':'⚪ Sin comprobante adjunto'}</p>
  <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn pri" id="comp-ver" ${tiene?'':'disabled'}>👁️ Ver</button><button class="btn" id="comp-sub">📎 ${tiene?'Reemplazar':'Subir PDF'}</button><button class="btn warn" id="comp-del" ${tiene?'':'disabled'}>🗑️ Eliminar</button><button class="btn" data-act="close-modal">Cerrar</button></div>
  <p class="mut" style="margin-top:8px">${fb.user&&fb.loaded?'☁️ Los comprobantes se guardan en la nube.':'⚠️ Inicia sesión en Firebase para guardar en la nube.'}</p>`);
- $('#comp-ver').onclick=async()=>{try{if(enNube){openViewer(d,await compUrl(d.compPath),compModal);}else{const b=await docGet(id+'_comp');if(!b)return toast('❌ Sin comprobante');openViewer(d,URL.createObjectURL(b),compModal);}}catch(e){toast('❌ No se pudo abrir');}};
- $('#comp-sub').onclick=()=>{const i=document.createElement('input');i.type='file';i.accept='application/pdf,.pdf';i.onchange=async()=>{const f=i.files[0];if(!f)return;if(f.type!=='application/pdf'&&!f.name.toLowerCase().endsWith('.pdf'))return toast('⚠️ Solo PDF');await docPut(id+'_comp',f);d.compPdf=true;save();if(fb.user&&fb.loaded){try{d.compPath=await compUpload(id,f);save();toast('☁️ Comprobante subido a la nube');}catch(e){d.compPath=null;toast('📱 Comprobante en este equipo');}}else toast('📱 Comprobante en este equipo');compModal(id);};i.click();};
- $('#comp-del').onclick=async()=>{if(d.compPath)await compDelete(d.compPath);await docDel(id+'_comp');d.compPath=null;d.compPdf=false;save();toast('🗑️ Comprobante eliminado');compModal(id);};
+ $('#comp-ver').onclick=async()=>{try{const u=enNube?await compUrl(p.compPath):(blob?URL.createObjectURL(blob):null);if(!u)return toast('❌ Sin comprobante');openViewer({nombre:p.deuda},u,()=>compModal(pid));}catch(e){toast('❌ No se pudo abrir');}};
+ $('#comp-sub').onclick=()=>{const i=document.createElement('input');i.type='file';i.accept='application/pdf,.pdf';i.onchange=async()=>{const f=i.files[0];if(!f)return;if(f.type!=='application/pdf'&&!f.name.toLowerCase().endsWith('.pdf'))return toast('⚠️ Solo PDF');if(p.compPath)await compDelete(p.compPath);await docDel(pid+'_comp');attachCompPago(p,f);save();compModal(pid);};i.click();};
+ $('#comp-del').onclick=async()=>{await removeCompPago(p);toast('🗑️ Comprobante eliminado');compModal(pid);};
 }
 /* ============================== VISTAS ============================== */
 function histData(){const map={};const add=(m,k,v)=>{(map[m]??={ing:0,gas:0});map[m][k]+=Number(v)||0;};for(const g of db.ingresos)add(mkey(g.fecha),'ing',g.monto);for(const g of db.gastos)add(mkey(g.fecha),'gas',g.monto);for(const p of db.pagos)add(mkey(p.fecha),'gas',p.monto);return map;}
@@ -281,7 +262,6 @@ function formDeuda(d={}){
  ${sel('f_estado','Estado',estOpts,d.estado||'vigente')}
  ${inp('f_notas','Notas',d.notas||'')}
  <label class="fld"><span>📄 Estado de cuenta PDF (opcional)</span><input type="file" id="f_pdf" accept="application/pdf,.pdf"></label>
- <label class="fld"><span>🧾 Comprobante de pago PDF (opcional)</span><input type="file" id="f_pdf2" accept="application/pdf,.pdf"></label>
  <div class="frm-btns"><button type="submit" class="btn pri">💾 Guardar</button><button type="button" class="btn" data-act="close-modal">Cancelar</button></div>
  </form>`;
 }
@@ -360,18 +340,7 @@ function bindDeudaForm(orig){
    }
   }
 
-  const pf2=$('#f_pdf2')?$('#f_pdf2').files[0]:null;
-  if(pf2){
-   if(pf2.type!=='application/pdf'&&!pf2.name.toLowerCase().endsWith('.pdf'))toast('⚠️ El comprobante debe ser PDF');
-   else{
-    const dd=debtById(id);
-    if(dd){
-     docPut(id+'_comp',pf2);dd.compPdf=true;
-     if(fb.user&&fb.loaded){compUpload(id,pf2).then(p=>{dd.compPath=p;save();toast('☁️ Comprobante subido a la nube');}).catch(()=>toast('📱 Comprobante en este equipo'));}
-     else toast('📱 Comprobante en este equipo');
-    }
-   }
-  }
+
 
   save();closeModal();render();toast('💾 Deuda guardada');
  };
@@ -381,15 +350,18 @@ function openPagoModal(id){const d=debtById(id);if(!d)return;const min=d.sinVenc
  openModal(`💰 Pago: ${esc(d.nombre)}`,`<div class="card" style="background:#f8fafc"><div class="list-item"><span>Facturado mes</span><b>${fmt(d.montoFacturadoMes)}</b></div><div class="list-item"><span>Pago mínimo</span><b>${fmt(min)}</b></div><div class="list-item"><span>Saldo pago mínimo</span><b>${fmt(cicloRestante(d))}</b></div><div class="list-item"><span>Saldo facturado</span><b>${fmt(saldoFacturado(d))}</b></div><div class="list-item"><span>Saldo pendiente</span><b>${fmt(saldoTotalPendiente(d))}</b></div></div><form id="frm_pago"><div class="row2">${inp('p_fecha','Fecha',today(),'date')}${inp('p_monto','Monto ($)','','number','required min="1"')}</div>${inp('p_nota','Nota adicional (opcional)','')}<label class="fld"><span>🧾 Comprobante de pago PDF (opcional)</span><input type="file" id="p_pdf" accept="application/pdf,.pdf"></label><div class="frm-btns"><button class="btn pri" type="submit">✅ Confirmar</button><button class="btn" type="button" data-act="close-modal">Cancelar</button></div></form>`);
  $('#frm_pago').onsubmit=e=>{e.preventDefault();const fecha=$('#p_fecha').value,monto=+$('#p_monto').value,nota=$('#p_nota').value.trim();if(!fecha||monto<=0)return;
  const f=$('#p_pdf')?$('#p_pdf').files[0]||null:null;
- closeModal();
- if(f){if(f.type!=='application/pdf'&&!f.name.toLowerCase().endsWith('.pdf'))toast('⚠️ El comprobante debe ser PDF');else{const dd=debtById(id);if(dd){docPut(id+'_comp',f);dd.compPdf=true;if(fb.user&&fb.loaded){compUpload(id,f).then(p=>{dd.compPath=p;save();toast('☁️ Comprobante subido a la nube');}).catch(()=>toast('📱 Comprobante en este equipo'));}else toast('📱 Comprobante en este equipo');}}}
- confirmarPago(id,fecha,monto,nota);};}
+ if(f&&f.type!=='application/pdf'&&!f.name.toLowerCase().endsWith('.pdf'))return toast('⚠️ El comprobante debe ser PDF');
+ closeModal();confirmarPago(id,fecha,monto,nota,f);};
 function renderDeudas(){const orden={morosa:0,vigente:1,pagada:2};let list=db.deudas.filter(d=>deudaVerArch?d.archivada:!d.archivada);if(deudaFilter!=='todas')list=list.filter(d=>d.estado===deudaFilter);list.sort((a,b)=>orden[a.estado]-orden[b.estado]||(diasMora(b)||0)-(diasMora(a)||0));
- const cards=list.map(d=>{const ac=acById(d.acreedorId);const rest=cicloRestante(d);return `<div class="card debt ${d.estado==='morosa'?'m':d.estado==='pagada'?'p':''}"><div class="top"><span class="name">${esc(d.nombre)}</span><span class="row" style="gap:6px"><span class="badge b-${d.estado}">${d.estado.toUpperCase()}</span>${moraChip(d)}</span></div><div class="mut">${esc(d.persona)} · ${esc(d.tipoDeuda)} · ${esc(ac?ac.nombre:'—')}</div><div class="data"><span>💵 Total: <b>${fmt(d.montoTotal)}</b></span><span>📉 Saldo: <b>${fmt(d.saldoTotal??d.montoTotal)}</b></span><span>🧾 Facturado: <b>${fmt(d.montoFacturadoMes)}</b></span><span>⬇️ Mínimo: <b>${fmt(minPago(d))}</b></span><span>📅 Vence: <b>${d.sinVencimiento?'Sin venc.':dstr(d.vencimiento)}</b></span><span>👛 Saldo mín.: ${rest<=0?'<span class="al-dia">Al Día ✅</span>':'<b class="err">'+fmt(rest)+'</b>'}</span><span>💼 Pendiente: <b>${fmt(saldoTotalPendiente(d))}</b></span></div><div class="acts">${d.estado!=='pagada'&&!d.archivada?`<button class="btn pri mini" data-act="pago" data-id="${d.id}">💰 Pago</button>`:''}${!d.archivada?`<button class="btn mini" data-act="edit-deuda" data-id="${d.id}">✏️</button><button class="btn mini" data-act="dup-mes" data-id="${d.id}" title="Duplicar p/ próximo mes">🔁 +1 mes</button><button class="btn mini" data-act="doc-deuda" data-id="${d.id}" title="Estado de cuenta PDF">${docIcon(!!(d.docPdf||d.docPath))}</button><button class="btn mini" data-act="comp-deuda" data-id="${d.id}" title="Comprobante de pago PDF">${compIcon(!!(d.compPdf||d.compPath))}</button><button class="btn mini" data-act="arch-deuda" data-id="${d.id}">📦</button>`:`<button class="btn mini" data-act="rest-deuda" data-id="${d.id}">♻️</button><button class="btn mini" data-act="doc-deuda" data-id="${d.id}" title="Estado de cuenta PDF">${docIcon(!!(d.docPdf||d.docPath))}</button><button class="btn mini" data-act="comp-deuda" data-id="${d.id}" title="Comprobante de pago PDF">${compIcon(!!(d.compPdf||d.compPath))}</button><button class="btn warn mini" data-act="del-deuda" data-id="${d.id}">🗑️</button>`}</div></div>`;}).join('');
+ const cards=list.map(d=>{const ac=acById(d.acreedorId);const rest=cicloRestante(d);const dComp=db.pagos.some(x=>x.deudaId===d.id&&(x.compPdf||x.compPath));return `<div class="card debt ${d.estado==='morosa'?'m':d.estado==='pagada'?'p':''}"><div class="top"><span class="name">${esc(d.nombre)}</span><span class="row" style="gap:6px"><span class="badge b-${d.estado}">${d.estado.toUpperCase()}</span>${moraChip(d)}</span></div><div class="mut">${esc(d.persona)} · ${esc(d.tipoDeuda)} · ${esc(ac?ac.nombre:'—')}</div><div class="data"><span>💵 Total: <b>${fmt(d.montoTotal)}</b></span><span>📉 Saldo: <b>${fmt(d.saldoTotal??d.montoTotal)}</b></span><span>🧾 Facturado: <b>${fmt(d.montoFacturadoMes)}</b></span><span>⬇️ Mínimo: <b>${fmt(minPago(d))}</b></span><span>📅 Vence: <b>${d.sinVencimiento?'Sin venc.':dstr(d.vencimiento)}</b></span><span>👛 Saldo mín.: ${rest<=0?'<span class="al-dia">Al Día ✅</span>':'<b class="err">'+fmt(rest)+'</b>'}</span><span>💼 Pendiente: <b>${fmt(saldoTotalPendiente(d))}</b></span></div><div class="acts">${d.estado!=='pagada'&&!d.archivada?`<button class="btn pri mini" data-act="pago" data-id="${d.id}">💰 Pago</button>`:''}${!d.archivada?`<button class="btn mini" data-act="edit-deuda" data-id="${d.id}">✏️</button><button class="btn mini" data-act="dup-mes" data-id="${d.id}" title="Duplicar p/ próximo mes">🔁 +1 mes</button><button class="btn mini" data-act="doc-deuda" data-id="${d.id}" title="Estado de cuenta PDF">${docIcon(!!(d.docPdf||d.docPath))}</button><button class="btn mini" data-act="comp-deuda" data-id="${d.id}" title="Comprobante de pago PDF">${compIcon(dComp)}</button><button class="btn mini" data-act="arch-deuda" data-id="${d.id}">📦</button>`:`<button class="btn mini" data-act="rest-deuda" data-id="${d.id}">♻️</button><button class="btn mini" data-act="doc-deuda" data-id="${d.id}" title="Estado de cuenta PDF">${docIcon(!!(d.docPdf||d.docPath))}</button><button class="btn mini" data-act="comp-deuda" data-id="${d.id}" title="Comprobante de pago PDF">${compIcon(dComp)}</button><button class="btn warn mini" data-act="del-deuda" data-id="${d.id}">🗑️</button>`}</div></div>`;}).join('');
  $('#ct-deudas').innerHTML=`<div class="row between"><h2>💳 Deudas</h2><span class="row"><button class="btn" data-act="img2pdf" title="Convertir imagen a PDF">🖼️→</button><button class="btn ${deudaVerArch?'soft':'pri'}" data-act="toggle-arch-deudas">📦</button><button class="btn pri" data-act="new-deuda">➕ Nueva</button></span></div><div class="filters">${['todas','vigente','morosa','pagada'].map(f=>`<button class="nbtn ${deudaFilter===f?'on':''}" data-act="filter-deuda" data-id="${f}">${f==='todas'?'Todas':f+'s'}</button>`).join('')}</div>${cards||'<div class="card"><p class="mut">Sin deudas.</p></div>'}`;}
 function openEditPago(id){
  const p=db.pagos.find(x=>x.id===id);if(!p)return;
- openModal('✏️ Editar pago: '+esc(p.deuda),`<form id="frm_ep">${inp('ep_fecha','Fecha',p.fecha,'date')}${inp('ep_monto','Monto ($)',p.monto,'number')}${inp('ep_nota','Nota adicional (opcional)',p.nota||'')}<div class="frm-btns"><button class="btn pri" type="submit">💾 Guardar</button><button class="btn" type="button" data-act="close-modal">Cancelar</button></div></form>`);
+ const tiene=!!(p.compPdf||p.compPath);
+ openModal('✏️ Editar pago: '+esc(p.deuda),`<form id="frm_ep">${inp('ep_fecha','Fecha',p.fecha,'date')}${inp('ep_monto','Monto ($)',p.monto,'number')}${inp('ep_nota','Nota adicional (opcional)',p.nota||'')}<div class="row" style="gap:6px;flex-wrap:wrap;margin:4px 0 8px"><button type="button" class="btn" id="ep-ver" ${tiene?'':'disabled'}>🧾 Ver comprobante</button><button type="button" class="btn" id="ep-adj">📎 ${tiene?'Reemplazar':'Adjuntar'} PDF</button><button type="button" class="btn warn" id="ep-qui" ${tiene?'':'disabled'}>🗑️ Quitar</button></div><div class="frm-btns"><button class="btn pri" type="submit">💾 Guardar</button><button class="btn" type="button" data-act="close-modal">Cancelar</button></div></form>`);
+ $('#ep-ver').onclick=()=>compModal(id);
+ $('#ep-adj').onclick=()=>{const i=document.createElement('input');i.type='file';i.accept='application/pdf,.pdf';i.onchange=async()=>{const f=i.files[0];if(!f)return;if(f.type!=='application/pdf'&&!f.name.toLowerCase().endsWith('.pdf'))return toast('⚠️ Solo PDF');if(p.compPath)await compDelete(p.compPath);await docDel(id+'_comp');attachCompPago(p,f);save();openEditPago(id);};i.click();};
+ $('#ep-qui').onclick=async()=>{await removeCompPago(p);toast('🗑️ Comprobante eliminado');openEditPago(id);};
  $('#frm_ep').onsubmit=e=>{
   e.preventDefault();
   const fecha=$('#ep_fecha').value,monto=Math.round(Number($('#ep_monto').value)||0),nota=$('#ep_nota').value.trim();
@@ -427,7 +399,7 @@ function openEditPago(id){
  };
 }
 function renderPagos(){const list=db.pagos.filter(p=>pagoVerArch?p.archivado:!p.archivado);
- $('#ct-pagos').innerHTML=`<div class="row between"><h2>🧾 Pagos</h2><span class="row"><button class="btn" data-act="img2pdf" title="Convertir imagen a PDF">🖼️→📄</button><button class="btn ${pagoVerArch?'soft':'pri'}" data-act="toggle-arch-pagos">📦</button></span></div><div class="card tblwrap"><table><tr><th>Fecha</th><th>Deuda</th><th>Monto</th><th>Tipo</th><th></th></tr>${list.map(p=>`<tr><td>${dstr(p.fecha)}</td><td>${esc(p.deuda)}${p.nota?'<br><span class="mut">📝 '+esc(p.nota)+'</span>':''}</td><td><b>${fmt(p.monto)}</b>${p.excesoNoDescontado?'<br><span class="mut">Descuenta: '+fmt(p.montoDescontado||0)+'<br>No descuenta: '+fmt(p.excesoNoDescontado)+'</span>':''}</td><td>${p.tipo}</td><td><button class="btn mini" data-act="edit-pago" data-id="${p.id}">✏️</button>${p.archivado?`<button class="btn mini" data-act="rest-pago" data-id="${p.id}">♻️</button>`:`<button class="btn mini" data-act="arch-pago" data-id="${p.id}">📦</button>`}</td></tr>`).join('')}</table>${list.length?'':'<p class="mut">Sin pagos.</p>'}</div>`;}
+ $('#ct-pagos').innerHTML=`<div class="row between"><h2>🧾 Pagos</h2><span class="row"><button class="btn" data-act="img2pdf" title="Convertir imagen a PDF">🖼️→📄</button><button class="btn ${pagoVerArch?'soft':'pri'}" data-act="toggle-arch-pagos">📦</button></span></div><div class="card tblwrap"><table><tr><th>Fecha</th><th>Deuda</th><th>Monto</th><th>Tipo</th><th></th></tr>${list.map(p=>`<tr><td>${dstr(p.fecha)}</td><td>${esc(p.deuda)}${p.nota?'<br><span class="mut">📝 '+esc(p.nota)+'</span>':''}</td><td><b>${fmt(p.monto)}</b>${p.excesoNoDescontado?'<br><span class="mut">Descuenta: '+fmt(p.montoDescontado||0)+'<br>No descuenta: '+fmt(p.excesoNoDescontado)+'</span>':''}</td><td>${p.tipo}</td><td><button class="btn mini" data-act="edit-pago" data-id="${p.id}">✏️</button><button class="btn mini" data-act="comp-pago" data-id="${p.id}" title="Comprobante de pago">${compIcon(!!(p.compPdf||p.compPath))}</button>${p.archivado?`<button class="btn mini" data-act="rest-pago" data-id="${p.id}">♻️</button>`:`<button class="btn mini" data-act="arch-pago" data-id="${p.id}">📦</button>`}</td></tr>`).join('')}</table>${list.length?'':'<p class="mut">Sin pagos.</p>'}</div>`;}
 function renderAcreedores(){$('#ct-acreedores').innerHTML=`<h2>🏦 Acreedores</h2>`+[['financiera','🏦 Financieras'],['empresa','🏢 Empresas'],['persona','👤 Personas'],['otro','📌 Otros']].map(([t,l])=>{const list=db.acreedores.filter(a=>a.tipo===t);return `<div class="card"><div class="row between"><h3>${l}</h3><button class="btn pri mini" data-act="new-ac" data-id="${t}">➕</button></div>${list.map(a=>`<div class="list-item"><span><b>${esc(a.nombre)}</b>${a.codigoCliente?'<br><span class="mut">Código cliente: '+esc(a.codigoCliente)+'</span>':''}</span><span class="row"><button class="btn mini" data-act="edit-ac" data-id="${a.id}">✏️</button><button class="btn warn mini" data-act="del-ac" data-id="${a.id}">🗑️</button></span></div>`).join('')||'<p class="mut">Sin registros.</p>'}</div>`;}).join('');}
 function acModal(tipo,id){
  const a=id?acById(id):{tipo,nombre:'',nota:'',codigoCliente:''};
@@ -580,12 +552,12 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(
   case 'dup-mes':{const d=debtById(id);if(!d)break;const nv=addMonth(d.vencimiento||today(),1);const nd={...d,id:uid(),estado:'vigente',fechaPago:null,abonadoTotal:0,archivada:false,vencimiento:nv,sinVencimiento:false,docPdf:false,docPath:null,compPdf:false,compPath:null};const mesNuevo=new Date(nv+'T12:00').toLocaleDateString('es-CL',{month:'long'});nd.nombre=d.nombre.replace(/ — .*$/,'')+' — '+mesNuevo.charAt(0).toUpperCase()+mesNuevo.slice(1);const sh=d.saldoTotal??d.montoTotal;nd.montoTotal=sh;nd.saldoTotal=sh;db.deudas.push(nd);save();render();toast('🔁 Duplicada para '+mesNuevo);break;}
   case 'doc-deuda':docModal(id);break;
    case 'img2pdf':conversorImgPDF();break;
-  case 'comp-deuda':compModal(id);break;
-  case 'arch-deuda':archToggle(db.deudas,id,'Deuda');break;case 'rest-deuda':archToggle(db.deudas,id,'Deuda');break;
+case 'comp-deuda':{const ps=db.pagos.filter(x=>x.deudaId===id).sort((a,b)=>a.fecha<b.fecha?1:-1);if(!ps.length)return toast('⚠️ Registra un pago para adjuntar su comprobante');compModal(ps[0].id);break;}
+case 'comp-pago':compModal(id);break;  case 'arch-deuda':archToggle(db.deudas,id,'Deuda');break;case 'rest-deuda':archToggle(db.deudas,id,'Deuda');break;
   case 'del-deuda':confirmDlg('🗑️ Eliminar','¿Eliminar definitivamente?',()=>{const dd=debtById(id);if(dd){const otroD=db.deudas.find(x=>x.id!==id&&x.docPath&&x.docPath===dd.docPath);const otroC=db.deudas.find(x=>x.id!==id&&x.compPath&&x.compPath===dd.compPath);if(dd.docPath&&!otroD)docDelete(dd.docPath);if(dd.compPath&&!otroC)compDelete(dd.compPath);}docDel(id);docDel(id+'_comp');db.deudas=db.deudas.filter(d=>d.id!==id);save();render();});break;
   case 'filter-deuda':deudaFilter=id;renderDeudas();break;case 'toggle-arch-deudas':deudaVerArch=!deudaVerArch;renderDeudas();break;
   case 'toggle-arch-pagos':pagoVerArch=!pagoVerArch;renderPagos();break;case 'edit-pago':openEditPago(id);break;case 'arch-pago':archToggle(db.pagos,id,'Pago');break;case 'rest-pago':archToggle(db.pagos,id,'Pago');break;
-  case 'del-pago':confirmDlg('🗑️','¿Eliminar pago?',()=>{db.pagos=db.pagos.filter(p=>p.id!==id);save();render();});break;
+  case 'del-pago':confirmDlg('🗑️','¿Eliminar pago?',async()=>{const p=db.pagos.find(x=>x.id===id);if(p)await removeCompPago(p);db.pagos=db.pagos.filter(p=>p.id!==id);save();render();});break;
   case 'new-ac':acModal(id);break;case 'edit-ac':acModal(null,id);break;
   case 'del-ac':confirmDlg('🗑️','¿Eliminar acreedor?',()=>{db.acreedores=db.acreedores.filter(a=>a.id!==id);save();render();});break;
   case 'toggle-nums':showNums=!showNums;renderCuentas();break;
@@ -630,7 +602,7 @@ function showBioButton(){if(!localStorage.getItem('billetera_bio')||$('#lock-bio
 document.querySelector('#btn-lock').onclick=()=>{if(!db.auth)return toast('Sin contraseña');unlocked=false;$('#app').classList.add('hidden');$('#lock-screen').classList.remove('hidden');};
 $('#lock-btn').onclick=tryUnlock;
 $('#lock-pass').addEventListener('keydown',e=>{if(e.key==='Enter')tryUnlock();});
-init();renderNav();
+init();renderNav();migrarComprobantes();
 if(db.auth&&!unlocked){$('#lock-screen').classList.remove('hidden');showBioButton();bioUnlock().then(ok=>{if(ok)doUnlock();}).catch(()=>{});}
 else{unlocked=true;$('#lock-screen').classList.add('hidden');$('#app').classList.remove('hidden');render();revisarRecordatorios();aplicarAportesMes();}
 initFB();
