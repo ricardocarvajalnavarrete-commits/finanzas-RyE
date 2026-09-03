@@ -531,7 +531,38 @@ async function conversorImgPDF(){
  <label class="fld"><span>Imágenes</span><input type="file" id="img2pdf-files" accept="image/*" multiple></label>
  <div id="img2pdf-prev" class="row" style="gap:6px;flex-wrap:wrap;margin:8px 0"></div>
  <div class="frm-btns"><button class="btn pri" id="img2pdf-dl">⬇️ Descargar PDF</button><button class="btn" data-act="close-modal">Cerrar</button></div>`);
- $('#img2pdf-files').onchange=e=>{const prev=$('#img2pdf-prev');prev.innerHTML='';[...e.target.files].forEach(f=>{const im=document.createElement('img');im.src=URL.createObjectURL(f);
+ $('#img2pdf-files').onchange=e=>{const prev=$('#img2pdf-prev');prev.innerHTML='';[...e.target.files].forEach(f=>{const im=document.createElement('img');im.src=URL.createObjectURL(f);im.style.cssText='width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid #cbd5e1';prev.appendChild(im);});};
+ $('#img2pdf-dl').onclick=async()=>{
+  const files=[...$('#img2pdf-files').files];
+  if(!files.length)return toast('⚠️ Adjunta al menos una imagen');
+  toast('⏳ Generando PDF…');
+  const {jsPDF}=window.jspdf;let doc=null;
+  for(const f of files){
+   try{
+    let src=await createImageBitmap(f).catch(()=>null);
+    let iw=src?src.width:0,ih=src?src.height:0;
+    if(!src){
+     const dataUrl=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsDataURL(f);});
+     src=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=dataUrl;});
+     iw=src.naturalWidth||src.width;ih=src.naturalHeight||src.height;
+    }
+    const maxDim=2000;const sc=Math.min(1,maxDim/Math.max(iw||1,ih||1));
+    const cw=Math.max(1,Math.round((iw||1)*sc)),ch=Math.max(1,Math.round((ih||1)*sc));
+    const cv=document.createElement('canvas');cv.width=cw;cv.height=ch;
+    const cx=cv.getContext('2d');cx.fillStyle='#ffffff';cx.fillRect(0,0,cw,ch);cx.drawImage(src,0,0,cw,ch);
+    const jpeg=cv.toDataURL('image/jpeg',0.85);
+    const orient=cw>ch?'landscape':'portrait';
+    if(!doc)doc=new jsPDF({orientation:orient,unit:'mm',format:'a4'});else doc.addPage('a4',orient);
+    const pw=doc.internal.pageSize.getWidth(),ph=doc.internal.pageSize.getHeight(),m=8;
+    const ratio=Math.min((pw-2*m)/cw,(ph-2*m)/ch);
+    const w=cw*ratio,h=ch*ratio;
+    doc.addImage(jpeg,'JPEG',(pw-w)/2,(ph-h)/2,w,h);
+   }catch(e){console.error(e);toast('⚠️ No se pudo leer '+f.name);}
+  }
+  if(!doc)return toast('❌ No se pudo generar el PDF');
+  try{doc.save('convertido_'+today()+'.pdf');toast('⬇️ PDF descargado: ya puedes adjuntarlo');}catch(e){console.error(e);toast('❌ No se pudo guardar el PDF');}
+ };
+}
 /* ============================== IMPORTAR EXCEL ============================== */
 function parseFecha(v){if(!v)return null;if(v instanceof Date&&!isNaN(v))return v.toISOString().slice(0,10);const s=String(v).trim();let m=s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);if(m){let y=+m[3];if(y<100)y+=2000;return y+'-'+String(+m[2]).padStart(2,'0')+'-'+String(+m[1]).padStart(2,'0');}m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);if(m)return m[1]+'-'+String(+m[2]).padStart(2,'0')+'-'+String(+m[3]).padStart(2,'0');return null;}
 async function importarExcel(){await cargarXLSX();const inpF=document.createElement('input');inpF.type='file';inpF.accept='.xlsx,.xls';inpF.onchange=async()=>{const file=inpF.files[0];if(!file)return;toast('⏳ Leyendo…');try{const wb=XLSX.read(await file.arrayBuffer(),{type:'array'});const res={deudas:[],cuentas:[],tarjetas:[]};const num=v=>Number(String(v).replace(/[^0-9.-]/g,''))||0;
