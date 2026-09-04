@@ -30,6 +30,7 @@ const LS='billetera_familiar_v1';
 let db=null, curView='dashboard', unlocked=false, showNums=false, deudaFilter='todas', deudaVerArch=false, pagoVerArch=false;
 let _auto=false, syncDecidido=false;
 let cfTit='todos',cfBan='todos',tfTit='todos',tfEnt='todos';
+let pagoFiltroMes='todos',pagoFiltroTipo='todos',pagoBusca='';
 function load(){try{const s=localStorage.getItem(LS);return s?JSON.parse(s):null;}catch(e){return null;}}
 function save(){db.updatedAt=Date.now();if(!_auto)db.esSeed=false;localStorage.setItem(LS,JSON.stringify(db));guardarBackup();pushFB();}
 function dbValida(d){return !!(d&&Array.isArray(d.deudas)&&Array.isArray(d.pagos)&&Array.isArray(d.cuentas)&&Array.isArray(d.acreedores)&&Array.isArray(d.gastos));}
@@ -398,8 +399,33 @@ function openEditPago(id){
   }else aplicar(p.extraMode||'');
  };
 }
-function renderPagos(){const list=db.pagos.filter(p=>pagoVerArch?p.archivado:!p.archivado);
- $('#ct-pagos').innerHTML=`<div class="row between"><h2>🧾 Pagos</h2><span class="row"><button class="btn" data-act="img2pdf" title="Convertir imagen a PDF">🖼️→📄</button><button class="btn ${pagoVerArch?'soft':'pri'}" data-act="toggle-arch-pagos">📦</button></span></div><div class="card tblwrap"><table><tr><th>Fecha</th><th>Deuda</th><th>Monto</th><th>Tipo</th><th></th></tr>${list.map(p=>`<tr><td>${dstr(p.fecha)}</td><td>${esc(p.deuda)}${p.nota?'<br><span class="mut">📝 '+esc(p.nota)+'</span>':''}</td><td><b>${fmt(p.monto)}</b>${p.excesoNoDescontado?'<br><span class="mut">Descuenta: '+fmt(p.montoDescontado||0)+'<br>No descuenta: '+fmt(p.excesoNoDescontado)+'</span>':''}</td><td>${p.tipo}</td><td><button class="btn mini" data-act="edit-pago" data-id="${p.id}">✏️</button><button class="btn mini" data-act="comp-pago" data-id="${p.id}" title="Comprobante de pago">${compIcon(!!(p.compPdf||p.compPath))}</button>${p.archivado?`<button class="btn mini" data-act="rest-pago" data-id="${p.id}">♻️</button>`:`<button class="btn mini" data-act="arch-pago" data-id="${p.id}">📦</button>`}</td></tr>`).join('')}</table>${list.length?'':'<p class="mut">Sin pagos.</p>'}</div>`;}
+function renderPagos(){
+ const base=db.pagos.filter(p=>pagoVerArch?p.archivado:!p.archivado);
+ const tipos=[...new Set(base.map(p=>p.tipo))].sort();
+ const meses=[...new Set(base.map(p=>mkey(p.fecha)))].sort().reverse();
+ const mesLbl=m=>{const[y,mm]=m.split('-');const n=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];return (n[(+mm)-1]||mm)+' '+y;};
+ const q=pagoBusca.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+ const list=base.filter(p=>{
+  if(pagoFiltroMes!=='todos'&&mkey(p.fecha)!==pagoFiltroMes)return false;
+  if(pagoFiltroTipo!=='todos'&&p.tipo!==pagoFiltroTipo)return false;
+  if(q){const txt=((p.deuda||'')+' '+(p.nota||'')).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');if(!txt.includes(q))return false;}
+  return true;
+ });
+ const total=list.reduce((s,p)=>s+(Number(p.monto)||0),0);
+ const hayFiltros=!!(pagoBusca||pagoFiltroMes!=='todos'||pagoFiltroTipo!=='todos');
+ $('#ct-pagos').innerHTML=`<div class="row between"><h2>🧾 Pagos</h2><span class="row"><button class="btn" data-act="img2pdf" title="Convertir imagen a PDF">🖼️→📄</button><button class="btn ${pagoVerArch?'soft':'pri'}" data-act="toggle-arch-pagos">📦</button></span></div>
+ <div class="row" style="gap:8px;margin:10px 0;flex-wrap:wrap">
+  <input id="f-pg-busca" class="btn" style="max-width:260px;text-align:left" placeholder="🔍 Buscar deuda o nota…" value="${esc(pagoBusca)}">
+  <select id="f-pg-mes" class="btn" style="max-width:170px"><option value="todos">📅 Mes: todos</option>${meses.map(m=>`<option value="${m}" ${m===pagoFiltroMes?'selected':''}>${mesLbl(m)}</option>`).join('')}</select>
+  <select id="f-pg-tipo" class="btn" style="max-width:280px"><option value="todos">🧾 Tipo: todos</option>${tipos.map(t=>`<option value="${esc(t)}" ${t===pagoFiltroTipo?'selected':''}>${esc(t)}</option>`).join('')}</select>
+  ${hayFiltros?`<button class="btn soft" data-act="clear-pagos-filtros">✖ Limpiar</button>`:''}
+ </div>
+ <p class="mut" style="margin:0 0 8px">${list.length} pago(s) · Total: <b>${fmt(total)}</b></p>
+ <div class="card tblwrap"><table><tr><th>Fecha</th><th>Deuda</th><th>Monto</th><th>Tipo</th><th></th></tr>${list.map(p=>`<tr><td>${dstr(p.fecha)}</td><td>${esc(p.deuda)}${p.nota?'<br><span class="mut">📝 '+esc(p.nota)+'</span>':''}</td><td><b>${fmt(p.monto)}</b>${p.excesoNoDescontado?'<br><span class="mut">Descuenta: '+fmt(p.montoDescontado||0)+'<br>No descuenta: '+fmt(p.excesoNoDescontado)+'</span>':''}</td><td>${p.tipo}</td><td><button class="btn mini" data-act="edit-pago" data-id="${p.id}">✏️</button><button class="btn mini" data-act="comp-pago" data-id="${p.id}" title="Comprobante de pago">${compIcon(!!(p.compPdf||p.compPath))}</button>${p.archivado?`<button class="btn mini" data-act="rest-pago" data-id="${p.id}">♻️</button>`:`<button class="btn mini" data-act="arch-pago" data-id="${p.id}">📦</button>`}</td></tr>`).join('')}</table>${list.length?'':'<p class="mut">Sin pagos.</p>'}</div>`;
+ $('#f-pg-busca').addEventListener('input',e=>{pagoBusca=e.target.value;renderPagos();const el=$('#f-pg-busca');if(el){el.focus();el.setSelectionRange(el.value.length,el.value.length);}});
+ $('#f-pg-mes').onchange=e=>{pagoFiltroMes=e.target.value;renderPagos();};
+ $('#f-pg-tipo').onchange=e=>{pagoFiltroTipo=e.target.value;renderPagos();};
+}
 function renderAcreedores(){$('#ct-acreedores').innerHTML=`<h2>🏦 Acreedores</h2>`+[['financiera','🏦 Financieras'],['empresa','🏢 Empresas'],['persona','👤 Personas'],['otro','📌 Otros']].map(([t,l])=>{const list=db.acreedores.filter(a=>a.tipo===t);return `<div class="card"><div class="row between"><h3>${l}</h3><button class="btn pri mini" data-act="new-ac" data-id="${t}">➕</button></div>${list.map(a=>`<div class="list-item"><span><b>${esc(a.nombre)}</b>${a.codigoCliente?'<br><span class="mut">Código cliente: '+esc(a.codigoCliente)+'</span>':''}</span><span class="row"><button class="btn mini" data-act="edit-ac" data-id="${a.id}">✏️</button><button class="btn warn mini" data-act="del-ac" data-id="${a.id}">🗑️</button></span></div>`).join('')||'<p class="mut">Sin registros.</p>'}</div>`;}).join('');}
 function acModal(tipo,id){
  const a=id?acById(id):{tipo,nombre:'',nota:'',codigoCliente:''};
@@ -630,7 +656,7 @@ case 'comp-deuda':{const ps=db.pagos.filter(x=>x.deudaId===id).sort((a,b)=>a.fec
 case 'comp-pago':compModal(id);break;  case 'arch-deuda':archToggle(db.deudas,id,'Deuda');break;case 'rest-deuda':archToggle(db.deudas,id,'Deuda');break;
   case 'del-deuda':confirmDlg('🗑️ Eliminar','¿Eliminar definitivamente?',()=>{const dd=debtById(id);if(dd){const otroD=db.deudas.find(x=>x.id!==id&&x.docPath&&x.docPath===dd.docPath);const otroC=db.deudas.find(x=>x.id!==id&&x.compPath&&x.compPath===dd.compPath);if(dd.docPath&&!otroD)docDelete(dd.docPath);if(dd.compPath&&!otroC)compDelete(dd.compPath);}docDel(id);docDel(id+'_comp');db.deudas=db.deudas.filter(d=>d.id!==id);save();render();});break;
   case 'filter-deuda':deudaFilter=id;renderDeudas();break;case 'toggle-arch-deudas':deudaVerArch=!deudaVerArch;renderDeudas();break;
-  case 'toggle-arch-pagos':pagoVerArch=!pagoVerArch;renderPagos();break;case 'edit-pago':openEditPago(id);break;case 'arch-pago':archToggle(db.pagos,id,'Pago');break;case 'rest-pago':archToggle(db.pagos,id,'Pago');break;
+  case 'toggle-arch-pagos':pagoVerArch=!pagoVerArch;renderPagos();break;case 'clear-pagos-filtros':pagoBusca='';pagoFiltroMes='todos';pagoFiltroTipo='todos';renderPagos();break;case 'edit-pago':openEditPago(id);break;case 'arch-pago':archToggle(db.pagos,id,'Pago');break;case 'rest-pago':archToggle(db.pagos,id,'Pago');break;
   case 'del-pago':confirmDlg('🗑️','¿Eliminar pago?',async()=>{const p=db.pagos.find(x=>x.id===id);if(p)await removeCompPago(p);db.pagos=db.pagos.filter(p=>p.id!==id);save();render();});break;
   case 'new-ac':acModal(id);break;case 'edit-ac':acModal(null,id);break;
   case 'del-ac':confirmDlg('🗑️','¿Eliminar acreedor?',()=>{db.acreedores=db.acreedores.filter(a=>a.id!==id);save();render();});break;
