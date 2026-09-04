@@ -524,6 +524,10 @@ async function descifrarBoveda(obj,pass){const combos=[];[100000,120000,60000,25
 async function sincronizarBoveda(){
  let obj=null;
  try{const r=await fetch('https://ricardocarvajalnavarrete-commits.github.io/boveda-bancaria/boveda_cifrada.json',{cache:'no-store'});if(r.ok)obj=limpiarKeys(await r.json());}catch(e){}
+ if(!obj||!obj.data||!obj.salt||!obj.iv){
+  toast('📁 Bóveda no publicada: selecciónala desde tu equipo');
+  obj=await new Promise(res=>{const i=document.createElement('input');i.type='file';i.accept='.json';let done=false;const fin=v=>{if(!done){done=true;res(v);}};i.onchange=async()=>{try{fin(limpiarKeys(JSON.parse(await i.files[0].text())));}catch(e){fin(null);}};i.click();setTimeout(()=>fin(null),120000);});
+ }
  if(!obj||!obj.data||!obj.salt||!obj.iv)return toast('❌ No se encontró la bóveda');
  openModal('🔄 Actualizar desde Bóveda',`<form id="frm_sb">${inp('sb_pw','Contraseña de la bóveda','','password','required')}<p class="mut">Se actualizarán/crearán cuentas y tarjetas con los datos descifrados de la bóveda (números completos).</p><div class="frm-btns"><button class="btn pri">🔄 Actualizar</button><button class="btn" type="button" data-act="close-modal">Cancelar</button></div></form>`);
  $('#frm_sb').onsubmit=async e=>{
