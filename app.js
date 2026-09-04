@@ -438,8 +438,8 @@ function marcaTarjeta(num){const n=String(num||'').replace(/\D/g,'');if(!n)retur
 const mask=n=>{const s=String(n||'').replace(/\s/g,'');return s.length>4?'•••• •••• '+s.slice(-4):s;};
 function tarjetaModal(id){const t=id?db.tarjetas.find(x=>x.id===id):{persona:db.personas[0],formato:'Física',tipo:'Tarjeta Débito'};
  const optsVinc=[['','-- Sin vincular --'],...db.cuentas.filter(c=>!c.archivada).map(c=>[c.id,c.persona+' · '+c.banco+' · '+c.tipo+' · '+c.numero])];
- openModal(id?'✏️ Tarjeta':'➕ Tarjeta',`<form id="frm_t">${sel('t_per','Titular',db.personas.map(p=>[p,p]),t.persona)}${inp('t_ent','Entidad',t.entidad||'')}${sel('t_tipo','Tipo',['Tarjeta Débito','Tarjeta Prepago','Tarjeta Crédito'].map(x=>[x,x]),t.tipo)}${sel('t_fmt','Formato',[['Física','💳 Física'],['Virtual','🌐 Virtual'],['Ambas','💳🌐 Ambas']],t.formato)}${sel('t_vinc','Vinculada a cuenta',optsVinc,t.vinculadaCuentaId||'')}${inp('t_num','Número',t.numero||'')}<p class="mut" id="t_marca" style="margin:-4px 0 8px">💳 Marca: <b>${marcaTarjeta(t.numero)||'—'}</b></p>${inp('t_venc','Vence (MM/AA)',t.venc||'')}<div class="frm-btns"><button class="btn pri">💾</button><button class="btn" type="button" data-act="close-modal">Cancelar</button></div></form>`);
- $('#t_num').addEventListener('input',e=>{const m=marcaTarjeta(e.target.value);$('#t_marca').innerHTML='💳 Marca: <b>'+(m||'—')+'</b>';});  $('#frm_t').onsubmit=e=>{e.preventDefault();const v={persona:$('#t_per').value,entidad:$('#t_ent').value,tipo:$('#t_tipo').value,formato:$('#t_fmt').value,numero:$('#t_num').value,venc:$('#t_venc').value,vinculadaCuentaId:$('#t_vinc').value||null};if(id)Object.assign(t,v);else db.tarjetas.push(Object.assign({id:uid(),archivada:false},v));upsertBoveda(false,t);save();closeModal();render();};}
+ openModal(id?'✏️ Tarjeta':'➕ Tarjeta',`<form id="frm_t">${sel('t_per','Titular',db.personas.map(p=>[p,p]),t.persona)}${inp('t_ent','Entidad',t.entidad||'')}${sel('t_tipo','Tipo',['Tarjeta Débito','Tarjeta Prepago','Tarjeta Crédito'].map(x=>[x,x]),t.tipo)}${sel('t_fmt','Formato',[['Física','💳 Física'],['Virtual','🌐 Virtual'],['Ambas','💳🌐 Ambas']],t.formato)}${sel('t_vinc','Vinculada a cuenta',optsVinc,t.vinculadaCuentaId||'')}${inp('t_num','Número',t.numero||'')}<p class="mut" id="t_marca" style="margin:-4px 0 8px">💳 Marca: <b>${marcaTarjeta(t.numero)||'—'}</b></p>${inp('t_venc','Vence (MM/AA)',t.venc||'')}${inp('t_ccv','CCV (seguridad)',t.ccv||'')}<div class="frm-btns"><button class="btn pri">💾</button><button class="btn" type="button" data-act="close-modal">Cancelar</button></div></form>`);
+ $('#t_num').addEventListener('input',e=>{const m=marcaTarjeta(e.target.value);$('#t_marca').innerHTML='💳 Marca: <b>'+(m||'—')+'</b>';});  $('#frm_t').onsubmit=e=>{e.preventDefault();const v={persona:$('#t_per').value,entidad:$('#t_ent').value,tipo:$('#t_tipo').value,formato:$('#t_fmt').value,numero:$('#t_num').value,venc:$('#t_venc').value,ccv:$('#t_ccv').value,vinculadaCuentaId:$('#t_vinc').value||null};if(id)Object.assign(t,v);else db.tarjetas.push(Object.assign({id:uid(),archivada:false},v));upsertBoveda(false,t);save();closeModal();render();};}
 function renderCuentas(){
  const allC=db.cuentas.filter(c=>!c.archivada),allT=db.tarjetas.filter(t=>!t.archivada);
  const titC=[...new Set(allC.map(c=>c.persona))],banC=[...new Set(allC.map(c=>c.banco))].sort();
@@ -452,7 +452,7 @@ function renderCuentas(){
  <div class="row" style="gap:8px;margin:10px 0"><select id="f-ct-tit" class="btn" style="max-width:200px"><option value="todos">👤 Titular: todos</option>${titC.map(v=>op(v,cfTit)).join('')}</select><select id="f-ct-ban" class="btn" style="max-width:220px"><option value="todos">🏦 Banco: todos</option>${banC.map(v=>op(v,cfBan)).join('')}</select></div>
  <div class="card"><h3>Cuentas (${cs.length})</h3><div class="tblwrap"><table><tr><th>Titular</th><th>Banco</th><th>Tipo</th><th>Número de cuenta</th><th>Moneda</th><th>Nombre/uso</th><th>Estado</th><th></th></tr>${cs.map(c=>`<tr><td>${esc(c.persona)}</td><td>${esc(c.banco)}</td><td>${esc(c.tipo)}</td><td>${esc(c.numero)}</td><td>${esc(c.moneda||'CLP')}</td><td>${esc(c.nombre||'—')}</td><td>${esc(c.estado||'Activa')}</td><td><button class="btn mini" data-act="edit-cuenta" data-id="${c.id}">✏️</button><button class="btn mini" data-act="arch-cuenta" data-id="${c.id}">📦</button></td></tr>`).join('')||'<tr><td colspan="8" class="mut">Sin resultados.</td></tr>'}</table></div></div>
  <div class="row" style="gap:8px;margin:10px 0"><select id="f-tj-tit" class="btn" style="max-width:200px"><option value="todos">👤 Titular: todos</option>${titT.map(v=>op(v,tfTit)).join('')}</select><select id="f-tj-ent" class="btn" style="max-width:220px"><option value="todos">🏦 Entidad: todas</option>${entT.map(v=>op(v,tfEnt)).join('')}</select></div>
- <div class="card"><h3>Tarjetas (${ts.length})</h3><div class="tblwrap"><table><tr><th>Titular</th><th>Entidad</th><th>Tipo</th><th>Formato</th><th>Número</th><th>Vinculada a</th><th></th></tr>${ts.map(t=>`<tr><td>${esc(t.persona)}</td><td>${esc(t.entidad)}</td><td>${esc(t.tipo)}</td><td>${t.formato==='Virtual'?'🌐 Virtual':t.formato==='Ambas'?'💳🌐 Ambas':' Física'}</td><td>${esc(t.numero)}${marcaTarjeta(t.numero)?' <span class="mut">· '+marcaTarjeta(t.numero)+'</span>':''}</td><td>${vincInfo(t)}</td><td><button class="btn mini" data-act="edit-tarjeta" data-id="${t.id}">✏️</button><button class="btn mini" data-act="arch-tarjeta" data-id="${t.id}">📦</button></td></tr>`).join('')||'<tr><td colspan="7" class="mut">Sin resultados.</td></tr>'}</table></div></div>`;
+ <div class="card"><h3>Tarjetas (${ts.length})</h3><div class="tblwrap"><table><tr><th>Titular</th><th>Entidad</th><th>Tipo</th><th>Formato</th><th>Número</th><th>Vence</th><th>CCV</th><th>Vinculada a</th><th></th></tr>${ts.map(t=>`<tr><td>${esc(t.persona)}</td><td>${esc(t.entidad)}</td><td>${esc(t.tipo)}</td><td>${t.formato==='Virtual'?'🌐 Virtual':t.formato==='Ambas'?'💳🌐 Ambas':' Física'}</td><td>${esc(t.numero)}${marcaTarjeta(t.numero)?' <span class="mut">· '+marcaTarjeta(t.numero)+'</span>':''}</td><td>${esc(t.venc||'—')}</td><td>${t.ccv?`<span class="ccv-oculto" id="ccv-${t.id}">•••</span> <button class="btn mini" data-ccvbtn="${t.id}" title="Mantén presionado para ver">👁</button>`:'—'}</td><td>${vincInfo(t)}</td><td><button class="btn mini" data-act="edit-tarjeta" data-id="${t.id}">✏️</button><button class="btn mini" data-act="arch-tarjeta" data-id="${t.id}">📦</button></td></tr>`).join('')||'<tr><td colspan="9" class="mut">Sin resultados.</td></tr>'}</table></div></div>`;
  $('#f-ct-tit').onchange=e=>{cfTit=e.target.value;renderCuentas();};
  $('#f-ct-ban').onchange=e=>{cfBan=e.target.value;renderCuentas();};
  $('#f-tj-tit').onchange=e=>{tfTit=e.target.value;renderCuentas();};
@@ -552,7 +552,7 @@ async function sincronizarBoveda(){
    }else{
     let t=db.tarjetas.find(x=>coinciden(x.numero,r.numero,x.persona,r.titular));
     if(t){t.persona=r.titular||t.persona;t.entidad=r.banco||t.entidad;t.tipo=r.tipo||t.tipo;t.formato=r.formato||t.formato;t.venc=r.vence||t.venc;t.numero=r.numero;act++;}
-    else{db.tarjetas.push({id:uid(),persona:r.titular||db.personas[0],entidad:r.banco||'',tipo:r.tipo||'Tarjeta Débito',formato:r.formato||'Física',numero:r.numero,venc:r.vence||'',archivada:false});nue++;}
+    else{db.tarjetas.push({id:uid(),persona:r.titular||db.personas[0],entidad:r.banco||'',tipo:r.tipo||'Tarjeta Débito',formato:r.formato||'Física',numero:r.numero,venc:r.vence||'',ccv:r.ccv||'',archivada:false});nue++;}
    }
   });
   save();closeModal();render();
@@ -658,6 +658,11 @@ case 'comp-pago':compModal(id);break;  case 'arch-deuda':archToggle(db.deudas,id
   case 'fb-out':import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js').then(m=>m.signOut(fb.auth));break;
   case 'reset':confirmDlg('⚠️ Borrar todo','¿Continuar?',()=>{localStorage.removeItem(LS);location.reload();});break;
  }});
+document.addEventListener('pointerdown',e=>{const b=e.target.closest('[data-ccvbtn]');if(!b)return;const t=db.tarjetas.find(x=>x.id===b.dataset.ccvbtn);const s=document.getElementById('ccv-'+b.dataset.ccvbtn);if(t&&s)s.textContent=t.ccv||'•••';});
+const ocultarCcv=()=>{$$('.ccv-oculto').forEach(s=>s.textContent='•••');};
+document.addEventListener('pointerup',ocultarCcv);
+document.addEventListener('pointercancel',ocultarCcv);
+document.addEventListener('pointerout',e=>{if(e.target.closest&&e.target.closest('[data-ccvbtn]'))ocultarCcv();});
 async function completarDesdeBoveda(){
  let obj=null;
  try{const r=await fetch('https://ricardocarvajalnavarrete-commits.github.io/boveda-bancaria/boveda_cifrada.json',{cache:'no-store'});if(r.ok)obj=limpiarKeys(await r.json());}catch(e){}
@@ -688,11 +693,12 @@ async function completarDesdeBoveda(){
     usados.add(hit);
     if(String(hit.numero)!==String(r.numero)){hit.numero=r.numero;act++;}
     if(r.banco){if(esCuenta)hit.banco=hit.banco||r.banco;else hit.entidad=hit.entidad||r.banco;}
-    if(r.vence&&!hit.venc)hit.venc=r.vence;
+if(r.vence&&!hit.venc)hit.venc=r.vence;
+    if(r.ccv&&!hit.ccv)hit.ccv=r.ccv;
     if(r.formato&&!hit.formato)hit.formato=r.formato;
    }else{
     if(esCuenta)db.cuentas.push({id:uid(),persona:r.titular||db.personas[0],banco:r.banco||'',tipo:r.tipo||'Cuenta Corriente',numero:r.numero,moneda:'CLP',estado:'Activa',nombre:r.notas||'',saldo:null,archivada:false});
-    else db.tarjetas.push({id:uid(),persona:r.titular||db.personas[0],entidad:r.banco||'',tipo:r.tipo||'Tarjeta Débito',formato:r.formato||'Física',numero:r.numero,venc:r.vence||'',archivada:false});
+    else db.tarjetas.push({id:uid(),persona:r.titular||db.personas[0],entidad:r.banco||'',tipo:r.tipo||'Tarjeta Débito',formato:r.formato||'Física',numero:r.numero,venc:r.vence||'',ccv:r.ccv||'',archivada:false});
     nue++;
    }
   });
@@ -709,7 +715,7 @@ function upsertBoveda(esCuenta,r){
  if(!window._bovedaRegs)return;
  const digits=s=>String(s||'').replace(/\D/g,'');
  const normP=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
- const rec=esCuenta?{titular:r.persona,tipo:r.tipo,formato:'',banco:r.banco,numero:r.numero,vence:'',ccv:'',notas:r.nombre||''}:{titular:r.persona,tipo:r.tipo,formato:r.formato||'Física',banco:r.entidad,numero:r.numero,vence:r.venc||'',ccv:'',notas:''};
+ const rec=esCuenta?{titular:r.persona,tipo:r.tipo,formato:'',banco:r.banco,numero:r.numero,vence:'',ccv:'',notas:r.nombre||''}:{titular:r.persona,tipo:r.tipo,formato:r.formato||'Física',banco:r.entidad,numero:r.numero,vence:r.venc||'',ccv:r.ccv||'',notas:''};
  let hit=window._bovedaRegs.find(x=>digits(x.numero)&&digits(x.numero)===digits(r.numero));
  if(!hit)hit=window._bovedaRegs.find(x=>digits(x.numero).slice(-4)===digits(r.numero).slice(-4)&&normP(x.titular)===normP(r.persona));
  if(hit)Object.assign(hit,rec);else window._bovedaRegs.push(rec);
