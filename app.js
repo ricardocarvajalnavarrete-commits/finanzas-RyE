@@ -648,7 +648,7 @@ case 'comp-pago':compModal(id);break;  case 'arch-deuda':archToggle(db.deudas,id
   case 'install':installApp();break;
   case 'exp-cif':passModal('🔐 Cifrar respaldo','Cifrar',async pass=>{const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12));const key=await pbkdf2Key(pass,salt,['encrypt']);const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,enc(JSON.stringify(db)));descargar('respaldo_'+today()+'.json',JSON.stringify({salt:[...salt],iv:[...iv],data:[...new Uint8Array(ct)]}));toast('⬇️ Descargado');});break;
   case 'imp-cif':{const iF=document.createElement('input');iF.type='file';iF.accept='.json';iF.onchange=async()=>{const file=iF.files[0];if(!file)return;const obj=JSON.parse(await file.text());openModal('🔓 Importar',`<form id="frm_imp">${inp('imp_pw','Contraseña','','password')}<div class="frm-btns"><button class="btn pri">Importar</button></div></form>`);$('#frm_imp').onsubmit=async e=>{e.preventDefault();try{const key=await pbkdf2Key($('#imp_pw').value,new Uint8Array(obj.salt),['decrypt']);const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:new Uint8Array(obj.iv)},key,new Uint8Array(obj.data));db=completarDB(JSON.parse(dec(pt)));db.esSeed=false;localStorage.setItem(LS,JSON.stringify(db));evaluarDeudas();closeModal();render();toast('✅ Importado');}catch(err){toast('❌ Clave inválida');}};};iF.click();break;}
-  case 'sync-boveda':completarDesdeBoveda();break;case 'exp-boveda-up':exportarBovedaActualizada();break;case 'exp-boveda-pdf':exportBovedaPDF();break;case 'imp-excel':importarExcel();break;case 'exp-excel':exportarExcel();break;
+  case 'sync-boveda':completarDesdeBoveda();break;case 'sync-boveda2':sincronizarBoveda();break;case 'exp-boveda-up':exportarBovedaActualizada();break;case 'exp-boveda-pdf':exportBovedaPDF();break;case 'imp-excel':importarExcel();break;case 'exp-excel':exportarExcel();break;
   case 'exp-json':descargar('billetera_'+today()+'.json',JSON.stringify(db));break;
   case 'imp-json':{const iF=document.createElement('input');iF.type='file';iF.accept='.json';iF.onchange=async()=>{let d=null;try{d=JSON.parse(await iF.files[0].text());}catch(e){}if(!dbValida(d))return toast('❌ Respaldo inválido');db=completarDB(d);db.esSeed=false;localStorage.setItem(LS,JSON.stringify(db));evaluarDeudas();render();toast('✅ Importado');};iF.click();break;}
   case 'rest-backup':{let b=null;try{b=JSON.parse(localStorage.getItem(LS_BACKUP)||'null');}catch(e){}if(!b||!dbValida(b.db))return toast('❌ Sin copia');confirmDlg('🛟 Restaurar','¿Restaurar copia automática?',()=>{db=completarDB(b.db);db.esSeed=false;localStorage.setItem(LS,JSON.stringify(db));render();toast('✅ Restaurado');});break;}
@@ -694,7 +694,7 @@ async function completarDesdeBoveda(){
     if(String(hit.numero)!==String(r.numero)){hit.numero=r.numero;act++;}
     if(r.banco){if(esCuenta)hit.banco=hit.banco||r.banco;else hit.entidad=hit.entidad||r.banco;}
 if(r.vence&&!hit.venc)hit.venc=r.vence;
-    if(r.ccv&&!hit.ccv)hit.ccv=r.ccv;
+    if(r.ccv)hit.ccv=r.ccv;
     if(r.formato&&!hit.formato)hit.formato=r.formato;
    }else{
     if(esCuenta)db.cuentas.push({id:uid(),persona:r.titular||db.personas[0],banco:r.banco||'',tipo:r.tipo||'Cuenta Corriente',numero:r.numero,moneda:'CLP',estado:'Activa',nombre:r.notas||'',saldo:null,archivada:false});
