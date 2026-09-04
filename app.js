@@ -433,12 +433,12 @@ function acModal(tipo,id){
  };
 }
 function cuentaModal(id){const c=id?db.cuentas.find(x=>x.id===id):{persona:db.personas[0],moneda:'CLP',estado:'Activa'};openModal(id?'✏️ Cuenta':'➕ Cuenta',`<form id="frm_c">${sel('c_per','Titular',db.personas.map(p=>[p,p]),c.persona)}${inp('c_banco','Banco',c.banco||'')}${sel('c_tipo','Tipo',['Cuenta Corriente','Cuenta Vista','Cuenta RUT','Cuenta de Ahorro','Línea de Crédito','Cuenta USD','Otro'].map(t=>[t,t]),c.tipo||'Cuenta Corriente')}${inp('c_num','N°',c.numero||'')}<div class="row2">${sel('c_mon','Moneda',[['CLP','CLP'],['USD','USD']],c.moneda)}${sel('c_est','Estado',[['Activa','Activa'],['Inactiva','Inactiva'],['Bloqueada','Bloqueada']],c.estado)}</div>${inp('c_nom','Nombre/uso',c.nombre||'')}<div class="frm-btns"><button class="btn pri">💾</button><button class="btn" type="button" data-act="close-modal">Cancelar</button></div></form>`);
- $('#frm_c').onsubmit=e=>{e.preventDefault();const v={persona:$('#c_per').value,banco:$('#c_banco').value,tipo:$('#c_tipo').value,numero:$('#c_num').value,moneda:$('#c_mon').value,estado:$('#c_est').value,nombre:$('#c_nom').value};if(id)Object.assign(c,v);else db.cuentas.push(Object.assign({id:uid(),archivada:false,saldo:null},v));save();closeModal();render();};}
+ $('#frm_c').onsubmit=e=>{e.preventDefault();const v={persona:$('#c_per').value,banco:$('#c_banco').value,tipo:$('#c_tipo').value,numero:$('#c_num').value,moneda:$('#c_mon').value,estado:$('#c_est').value,nombre:$('#c_nom').value};if(id)Object.assign(c,v);else db.cuentas.push(Object.assign({id:uid(),archivada:false,saldo:null},v));upsertBoveda(true,c);save();closeModal();render();};}
 const mask=n=>{const s=String(n||'').replace(/\s/g,'');return s.length>4?'•••• •••• '+s.slice(-4):s;};
 function tarjetaModal(id){const t=id?db.tarjetas.find(x=>x.id===id):{persona:db.personas[0],formato:'Física',tipo:'Tarjeta Débito'};
  const optsVinc=[['','-- Sin vincular --'],...db.cuentas.filter(c=>!c.archivada).map(c=>[c.id,c.persona+' · '+c.banco+' · '+c.tipo+' · '+c.numero])];
  openModal(id?'✏️ Tarjeta':'➕ Tarjeta',`<form id="frm_t">${sel('t_per','Titular',db.personas.map(p=>[p,p]),t.persona)}${inp('t_ent','Entidad',t.entidad||'')}${sel('t_tipo','Tipo',['Tarjeta Débito','Tarjeta Prepago','Tarjeta Crédito'].map(x=>[x,x]),t.tipo)}${sel('t_fmt','Formato',[['Física','💳 Física'],['Virtual','🌐 Virtual'],['Ambas','💳🌐 Ambas']],t.formato)}${sel('t_vinc','Vinculada a cuenta',optsVinc,t.vinculadaCuentaId||'')}${inp('t_num','Número',t.numero||'')}${inp('t_venc','Vence (MM/AA)',t.venc||'')}<div class="frm-btns"><button class="btn pri">💾</button><button class="btn" type="button" data-act="close-modal">Cancelar</button></div></form>`);
- $('#frm_t').onsubmit=e=>{e.preventDefault();const v={persona:$('#t_per').value,entidad:$('#t_ent').value,tipo:$('#t_tipo').value,formato:$('#t_fmt').value,numero:$('#t_num').value,venc:$('#t_venc').value,vinculadaCuentaId:$('#t_vinc').value||null};if(id)Object.assign(t,v);else db.tarjetas.push(Object.assign({id:uid(),archivada:false},v));save();closeModal();render();};}
+ $('#frm_t').onsubmit=e=>{e.preventDefault();const v={persona:$('#t_per').value,entidad:$('#t_ent').value,tipo:$('#t_tipo').value,formato:$('#t_fmt').value,numero:$('#t_num').value,venc:$('#t_venc').value,vinculadaCuentaId:$('#t_vinc').value||null};if(id)Object.assign(t,v);else db.tarjetas.push(Object.assign({id:uid(),archivada:false},v));upsertBoveda(false,t);save();closeModal();render();};}
 function renderCuentas(){
  const allC=db.cuentas.filter(c=>!c.archivada),allT=db.tarjetas.filter(t=>!t.archivada);
  const titC=[...new Set(allC.map(c=>c.persona))],banC=[...new Set(allC.map(c=>c.banco))].sort();
@@ -447,7 +447,7 @@ function renderCuentas(){
  const ts=allT.filter(t=>(tfTit==='todos'||t.persona===tfTit)&&(tfEnt==='todos'||t.entidad===tfEnt));
  const op=(v,cur)=>`<option value="${esc(v)}" ${String(v)===String(cur)?'selected':''}>${esc(v)}</option>`;
  const vincInfo=t=>{const vc=db.cuentas.find(c=>c.id===t.vinculadaCuentaId);return vc?`${esc(vc.tipo)} ${esc(vc.numero)} · ${esc(vc.banco)}`:'—';};
- $('#ct-cuentas').innerHTML=`<div class="row between"><h2>🏛️ Cuentas y tarjetas</h2><span class="row"><a href="https://ricardocarvajalnavarrete-commits.github.io/boveda-bancaria/" target="_blank" rel="noopener" class="btn pri">🔐 Bóveda</a><button class="btn soft" data-act="sync-boveda" title="Actualizar cuentas y tarjetas desde la bóveda">🔄 Actualizar</button><button class="btn soft" data-act="exp-boveda-pdf">📄 PDF</button><button class="btn pri" data-act="new-cuenta">➕ Cuenta</button><button class="btn pri" data-act="new-tarjeta">➕ Tarjeta</button></span></div>
+ $('#ct-cuentas').innerHTML=`<div class="row between"><h2>🏛️ Cuentas y tarjetas</h2><span class="row"><a href="https://ricardocarvajalnavarrete-commits.github.io/boveda-bancaria/" target="_blank" rel="noopener" class="btn pri">🔐 Bóveda</a><button class="btn soft" data-act="sync-boveda" title="Actualizar cuentas y tarjetas desde la bóveda">🔄 Actualizar</button><button class="btn soft" data-act="exp-boveda-up" title="Descargar bóveda actualizada con tus cambios">💾 Bóveda</button><button class="btn soft" data-act="exp-boveda-pdf">📄 PDF</button><button class="btn pri" data-act="new-cuenta">➕ Cuenta</button><button class="btn pri" data-act="new-tarjeta">➕ Tarjeta</button></span></div>
  <div class="row" style="gap:8px;margin:10px 0"><select id="f-ct-tit" class="btn" style="max-width:200px"><option value="todos">👤 Titular: todos</option>${titC.map(v=>op(v,cfTit)).join('')}</select><select id="f-ct-ban" class="btn" style="max-width:220px"><option value="todos">🏦 Banco: todos</option>${banC.map(v=>op(v,cfBan)).join('')}</select></div>
  <div class="card"><h3>Cuentas (${cs.length})</h3><div class="tblwrap"><table><tr><th>Titular</th><th>Banco</th><th>Número de cuenta</th><th></th></tr>${cs.map(c=>`<tr><td>${esc(c.persona)}</td><td>${esc(c.banco)}</td><td>${esc(c.numero)}</td><td><button class="btn mini" data-act="edit-cuenta" data-id="${c.id}">✏️</button><button class="btn mini" data-act="arch-cuenta" data-id="${c.id}">📦</button></td></tr>`).join('')||'<tr><td colspan="4" class="mut">Sin resultados.</td></tr>'}</table></div></div>
  <div class="row" style="gap:8px;margin:10px 0"><select id="f-tj-tit" class="btn" style="max-width:200px"><option value="todos">👤 Titular: todos</option>${titT.map(v=>op(v,tfTit)).join('')}</select><select id="f-tj-ent" class="btn" style="max-width:220px"><option value="todos">🏦 Entidad: todas</option>${entT.map(v=>op(v,tfEnt)).join('')}</select></div>
@@ -647,7 +647,7 @@ case 'comp-pago':compModal(id);break;  case 'arch-deuda':archToggle(db.deudas,id
   case 'install':installApp();break;
   case 'exp-cif':passModal('🔐 Cifrar respaldo','Cifrar',async pass=>{const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12));const key=await pbkdf2Key(pass,salt,['encrypt']);const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,enc(JSON.stringify(db)));descargar('respaldo_'+today()+'.json',JSON.stringify({salt:[...salt],iv:[...iv],data:[...new Uint8Array(ct)]}));toast('⬇️ Descargado');});break;
   case 'imp-cif':{const iF=document.createElement('input');iF.type='file';iF.accept='.json';iF.onchange=async()=>{const file=iF.files[0];if(!file)return;const obj=JSON.parse(await file.text());openModal('🔓 Importar',`<form id="frm_imp">${inp('imp_pw','Contraseña','','password')}<div class="frm-btns"><button class="btn pri">Importar</button></div></form>`);$('#frm_imp').onsubmit=async e=>{e.preventDefault();try{const key=await pbkdf2Key($('#imp_pw').value,new Uint8Array(obj.salt),['decrypt']);const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:new Uint8Array(obj.iv)},key,new Uint8Array(obj.data));db=completarDB(JSON.parse(dec(pt)));db.esSeed=false;localStorage.setItem(LS,JSON.stringify(db));evaluarDeudas();closeModal();render();toast('✅ Importado');}catch(err){toast('❌ Clave inválida');}};};iF.click();break;}
-  case 'sync-boveda':completarDesdeBoveda();break;case 'exp-boveda-pdf':exportBovedaPDF();break;case 'imp-excel':importarExcel();break;case 'exp-excel':exportarExcel();break;
+  case 'sync-boveda':completarDesdeBoveda();break;case 'exp-boveda-up':exportarBovedaActualizada();break;case 'exp-boveda-pdf':exportBovedaPDF();break;case 'imp-excel':importarExcel();break;case 'exp-excel':exportarExcel();break;
   case 'exp-json':descargar('billetera_'+today()+'.json',JSON.stringify(db));break;
   case 'imp-json':{const iF=document.createElement('input');iF.type='file';iF.accept='.json';iF.onchange=async()=>{let d=null;try{d=JSON.parse(await iF.files[0].text());}catch(e){}if(!dbValida(d))return toast('❌ Respaldo inválido');db=completarDB(d);db.esSeed=false;localStorage.setItem(LS,JSON.stringify(db));evaluarDeudas();render();toast('✅ Importado');};iF.click();break;}
   case 'rest-backup':{let b=null;try{b=JSON.parse(localStorage.getItem(LS_BACKUP)||'null');}catch(e){}if(!b||!dbValida(b.db))return toast('❌ Sin copia');confirmDlg('🛟 Restaurar','¿Restaurar copia automática?',()=>{db=completarDB(b.db);db.esSeed=false;localStorage.setItem(LS,JSON.stringify(db));render();toast('✅ Restaurado');});break;}
@@ -671,6 +671,7 @@ async function completarDesdeBoveda(){
   const datos=await descifrarBoveda(obj,$('#cb_pw').value);
   if(!datos)return toast('❌ Clave no coincide');
   const regs=normalizarBoveda(datos);
+  window._bovedaRegs=regs;window._bovedaPass=$('#cb_pw').value;
   const digits=s=>String(s||'').replace(/\D/g,'');
   const last4=s=>digits(s).slice(-4);
   const normP=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
@@ -702,6 +703,25 @@ async function completarDesdeBoveda(){
   save();closeModal();render();
   toast('✅ Bóveda: '+act+' números completados · '+nue+' nuevos · '+dup+' duplicados limpiados');
  };
+}
+function upsertBoveda(esCuenta,r){
+ if(!window._bovedaRegs)return;
+ const digits=s=>String(s||'').replace(/\D/g,'');
+ const normP=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+ const rec=esCuenta?{titular:r.persona,tipo:r.tipo,formato:'',banco:r.banco,numero:r.numero,vence:'',ccv:'',notas:r.nombre||''}:{titular:r.persona,tipo:r.tipo,formato:r.formato||'Física',banco:r.entidad,numero:r.numero,vence:r.venc||'',ccv:'',notas:''};
+ let hit=window._bovedaRegs.find(x=>digits(x.numero)&&digits(x.numero)===digits(r.numero));
+ if(!hit)hit=window._bovedaRegs.find(x=>digits(x.numero).slice(-4)===digits(r.numero).slice(-4)&&normP(x.titular)===normP(r.persona));
+ if(hit)Object.assign(hit,rec);else window._bovedaRegs.push(rec);
+}
+async function exportarBovedaActualizada(){
+ if(!window._bovedaRegs)return toast('⚠️ Primero pulsa 🔄 Actualizar y desbloquea la bóveda');
+ let pass=window._bovedaPass;if(!pass){pass=prompt('Contraseña de la bóveda:');if(!pass)return;}
+ const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12));
+ const km=await crypto.subtle.importKey('raw',new TextEncoder().encode(pass),'PBKDF2',false,['deriveKey']);
+ const key=await crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:100000,hash:'SHA-256'},km,{name:'AES-GCM',length:256},false,['encrypt']);
+ const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,new TextEncoder().encode(JSON.stringify(window._bovedaRegs)));
+ const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify({salt:[...salt],iv:[...iv],data:[...new Uint8Array(ct)]})],{type:'application/json'}));a.download='boveda_cifrada.json';a.click();
+ toast('⬇️ boveda_cifrada.json descargado: súbelo al repo boveda-bancaria');
 }
 /* ============================== PWA / ARRANQUE ============================== */
 let deferredPrompt=null;
