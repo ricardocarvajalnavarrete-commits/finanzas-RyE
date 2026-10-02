@@ -214,8 +214,30 @@ async function compModal(pid){
 /* ============================== VISTAS ============================== */
 function histData(){const map={};const add=(m,k,v)=>{(map[m]??={ing:0,gas:0});map[m][k]+=Number(v)||0;};for(const g of db.ingresos)add(mkey(g.fecha),'ing',g.monto);for(const g of db.gastos)add(mkey(g.fecha),'gas',g.monto);for(const p of db.pagos)add(mkey(p.fecha),'gas',p.monto);return map;}
 function balanceActual(){const h=histData();let b=0;for(const m in h)b+=h[m].ing-h[m].gas;return b;}
+function deudasRepresentativas(){
+ const activas=db.deudas.filter(d=>!d.archivada&&d.estado!=='pagada');
+ const grupos={};
+ for(const d of activas){
+  const key=(d.acreedorId||'_')+'|'+(d.persona||'_')+'|'+(d.tipoDeuda||'_');
+  if(!grupos[key])grupos[key]=[];
+  grupos[key].push(d);
+ }
+ const reps=new Set();
+ for(const key in grupos){
+  const lista=grupos[key];
+  if(lista.length===1){reps.add(lista[0].id);continue;}
+  lista.sort((a,b)=>{
+   const va=a.vencimiento||'1900-01-01';
+   const vb=b.vencimiento||'1900-01-01';
+   if(va!==vb)return vb.localeCompare(va);
+   return (b.montoTotal||0)-(a.montoTotal||0);
+  });
+  reps.add(lista[0].id);
+ }
+ return reps;
+}
 function renderDashboard(){
- const deudas=db.deudas.filter(d=>!d.archivada);const activas=deudas.filter(d=>d.estado!=='pagada');const morosas=activas.filter(d=>d.estado==='morosa');
+ const deudas=db.deudas.filter(d=>!d.archivada);const reps=deudasRepresentativas();const activas=deudas.filter(d=>d.estado!=='pagada'&&reps.has(d.id));const morosas=activas.filter(d=>d.estado==='morosa');
  const totalDeuda=activas.reduce((s,d)=>s+(d.saldoTotal??d.montoTotal),0);const cuotaMes=activas.reduce((s,d)=>s+(minPago(d)||0),0);
  const m=today().slice(0,7);const ingMes=db.ingresos.filter(i=>mkey(i.fecha)===m).reduce((s,i)=>s+i.monto,0);const gasMes=db.gastos.filter(g=>mkey(g.fecha)===m).reduce((s,g)=>s+g.monto,0);const pagadoMes=db.pagos.filter(p=>mkey(p.fecha)===m).reduce((s,p)=>s+p.monto,0);const saldo=balanceActual();
  const alertas=[];
@@ -353,8 +375,8 @@ function openPagoModal(id){const d=debtById(id);if(!d)return;const min=d.sinVenc
  const f=$('#p_pdf')?$('#p_pdf').files[0]||null:null;
  if(f&&f.type!=='application/pdf'&&!f.name.toLowerCase().endsWith('.pdf'))return toast('⚠️ El comprobante debe ser PDF');
  closeModal();confirmarPago(id,fecha,monto,nota,f);};}
-function renderDeudas(){const orden={morosa:0,vigente:1,pagada:2};let list=db.deudas.filter(d=>deudaVerArch?d.archivada:!d.archivada);if(deudaFilter!=='todas')list=list.filter(d=>d.estado===deudaFilter);list.sort((a,b)=>orden[a.estado]-orden[b.estado]||(diasMora(b)||0)-(diasMora(a)||0));
- const cards=list.map(d=>{const ac=acById(d.acreedorId);const rest=cicloRestante(d);const dComp=db.pagos.some(x=>x.deudaId===d.id&&(x.compPdf||x.compPath));return `<div class="card debt ${d.estado==='morosa'?'m':d.estado==='pagada'?'p':''}"><div class="top"><span class="name">${esc(d.nombre)}</span><span class="row" style="gap:6px"><span class="badge b-${d.estado}">${d.estado.toUpperCase()}</span>${moraChip(d)}</span></div><div class="mut">${esc(d.persona)} · ${esc(d.tipoDeuda)} · ${esc(ac?ac.nombre:'—')}</div><div class="data"><span>💵 Total: <b>${fmt(d.montoTotal)}</b></span><span>📉 Saldo: <b>${fmt(d.saldoTotal??d.montoTotal)}</b></span><span>🧾 Facturado: <b>${fmt(d.montoFacturadoMes)}</b></span><span>⬇️ Mínimo: <b>${fmt(minPago(d))}</b></span><span>📅 Vence: <b>${d.sinVencimiento?'Sin venc.':dstr(d.vencimiento)}</b></span><span>👛 Saldo mín.: ${rest<=0?'<span class="al-dia">Al Día ✅</span>':'<b class="err">'+fmt(rest)+'</b>'}</span><span>💼 Pendiente: <b>${fmt(saldoTotalPendiente(d))}</b></span></div><div class="acts">${d.estado!=='pagada'&&!d.archivada?`<button class="btn pri mini" data-act="pago" data-id="${d.id}">💰 Pago</button>`:''}${!d.archivada?`<button class="btn mini" data-act="edit-deuda" data-id="${d.id}">✏️</button><button class="btn mini" data-act="dup-mes" data-id="${d.id}" title="Duplicar p/ próximo mes">🔁 +1 mes</button><button class="btn mini" data-act="doc-deuda" data-id="${d.id}" title="Estado de cuenta PDF">${docIcon(!!(d.docPdf||d.docPath))}</button><button class="btn mini" data-act="comp-deuda" data-id="${d.id}" title="Comprobante de pago PDF">${compIcon(dComp)}</button><button class="btn mini" data-act="arch-deuda" data-id="${d.id}">📦</button>`:`<button class="btn mini" data-act="rest-deuda" data-id="${d.id}">♻️</button><button class="btn mini" data-act="doc-deuda" data-id="${d.id}" title="Estado de cuenta PDF">${docIcon(!!(d.docPdf||d.docPath))}</button><button class="btn mini" data-act="comp-deuda" data-id="${d.id}" title="Comprobante de pago PDF">${compIcon(dComp)}</button><button class="btn warn mini" data-act="del-deuda" data-id="${d.id}">🗑️</button>`}</div></div>`;}).join('');
+function renderDeudas(){const reps=deudasRepresentativas();const orden={morosa:0,vigente:1,pagada:2};let list=db.deudas.filter(d=>deudaVerArch?d.archivada:!d.archivada);if(deudaFilter!=='todas')list=list.filter(d=>d.estado===deudaFilter);list.sort((a,b)=>orden[a.estado]-orden[b.estado]||(diasMora(b)||0)-(diasMora(a)||0));
+ const cards=list.map(d=>{const ac=acById(d.acreedorId);const rest=cicloRestante(d);const dComp=db.pagos.some(x=>x.deudaId===d.id&&(x.compPdf||x.compPath));const esHist=!d.archivada&&d.estado!=='pagada'&&!reps.has(d.id);return `<div class="card debt ${d.estado==='morosa'?'m':d.estado==='pagada'?'p':''} ${esHist?'hist':''}"><div class="top"><span class="name">${esc(d.nombre)}${esHist?' <span class="badge b-hist" title="Hay una deuda más reciente de este mismo acreedor: no suma en los totales">⚠️ Histórica</span>':''}</span><span class="row" style="gap:6px"><span class="badge b-${d.estado}">${d.estado.toUpperCase()}</span>${moraChip(d)}</span></div><div class="mut">${esc(d.persona)} · ${esc(d.tipoDeuda)} · ${esc(ac?ac.nombre:'—')}</div><div class="data"><span>💵 Total: <b>${fmt(d.montoTotal)}</b></span><span>📉 Saldo: <b>${fmt(d.saldoTotal??d.montoTotal)}</b></span><span>🧾 Facturado: <b>${fmt(d.montoFacturadoMes)}</b></span><span>⬇️ Mínimo: <b>${fmt(minPago(d))}</b></span><span>📅 Vence: <b>${d.sinVencimiento?'Sin venc.':dstr(d.vencimiento)}</b></span><span>👛 Saldo mín.: ${rest<=0?'<span class="al-dia">Al Día ✅</span>':'<b class="err">'+fmt(rest)+'</b>'}</span><span>💼 Pendiente: <b>${fmt(saldoTotalPendiente(d))}</b></span></div><div class="acts">${d.estado!=='pagada'&&!d.archivada?`<button class="btn pri mini" data-act="pago" data-id="${d.id}">💰 Pago</button>`:''}${!d.archivada?`<button class="btn mini" data-act="edit-deuda" data-id="${d.id}">✏️</button><button class="btn mini" data-act="dup-mes" data-id="${d.id}" title="Duplicar p/ próximo mes">🔁 +1 mes</button><button class="btn mini" data-act="doc-deuda" data-id="${d.id}" title="Estado de cuenta PDF">${docIcon(!!(d.docPdf||d.docPath))}</button><button class="btn mini" data-act="comp-deuda" data-id="${d.id}" title="Comprobante de pago PDF">${compIcon(dComp)}</button><button class="btn mini" data-act="arch-deuda" data-id="${d.id}">📦</button>`:`<button class="btn mini" data-act="rest-deuda" data-id="${d.id}">♻️</button><button class="btn mini" data-act="doc-deuda" data-id="${d.id}" title="Estado de cuenta PDF">${docIcon(!!(d.docPdf||d.docPath))}</button><button class="btn mini" data-act="comp-deuda" data-id="${d.id}" title="Comprobante de pago PDF">${compIcon(dComp)}</button><button class="btn warn mini" data-act="del-deuda" data-id="${d.id}">🗑️</button>`}</div></div>`;}).join('');
  $('#ct-deudas').innerHTML=`<div class="row between"><h2>💳 Deudas</h2><span class="row"><button class="btn" data-act="img2pdf" title="Convertir imagen a PDF">🖼️→</button><button class="btn ${deudaVerArch?'soft':'pri'}" data-act="toggle-arch-deudas">📦</button><button class="btn pri" data-act="new-deuda">➕ Nueva</button></span></div><div class="filters">${['todas','vigente','morosa','pagada'].map(f=>`<button class="nbtn ${deudaFilter===f?'on':''}" data-act="filter-deuda" data-id="${f}">${f==='todas'?'Todas':f+'s'}</button>`).join('')}</div>${cards||'<div class="card"><p class="mut">Sin deudas.</p></div>'}`;}
 function openEditPago(id){
  const p=db.pagos.find(x=>x.id===id);if(!p)return;
